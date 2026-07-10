@@ -329,8 +329,32 @@ async def callback_source(client, callback_query):
     q_name = list(qualities.keys())[q_index]
     src = qualities[q_name][s_index]
     
+    redirect_url = src['url']
+    shortener_link = "Could not extract final link."
+    
+    # Try to extract final shortener link
+    try:
+        import aiohttp
+        import re
+        import json
+        async with aiohttp.ClientSession() as session:
+            async with session.get(redirect_url, timeout=5) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    match = re.search(r'window\.__PROPS__\s*=\s*(\{.*?\});', html)
+                    if match:
+                        data = json.loads(match.group(1))
+                        dest = data.get('destination')
+                        if dest:
+                            shortener_link = dest
+    except Exception as e:
+        pass
+    
     text = f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\n"
-    text += f"**{src['source']}**:\n`{src['url']}`\n\n(Long press the link above to copy it)"
+    text += f"**{src['source']}**:\n"
+    text += f"Redirect Link:\n`{redirect_url}`\n\n"
+    text += f"Shortener Link:\n`{shortener_link}`\n\n"
+    text += "(Long press the link above to copy it)"
     
     await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("« Back to Sources", callback_data=f"qual_{ptype}_{post_id}_{index}_{q_index}")],
