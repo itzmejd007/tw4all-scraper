@@ -165,6 +165,19 @@ async def callback_post(client, callback_query):
         if details:
             post.update(details)
             await database.add_or_update_post(post)
+    else:
+        # Auto-update legacy titles in database silently
+        needs_update = False
+        for i, ep in enumerate(post.get('episodes', [])):
+            if ep.get('title', '').strip() in ["Watch/Download", "Download", "Watch & Download", ""]:
+                ep['title'] = f"Episode {i+1:02d}"
+                needs_update = True
+        for i, z in enumerate(post.get('zips', [])):
+            if z.get('title', '').strip() in ["Watch/Download", "Download", "Watch & Download", ""]:
+                z['title'] = f"ZIP {i+1:02d}"
+                needs_update = True
+        if needs_update:
+            await database.add_or_update_post(post)
     
     text = f"**{post['title']}**\n\n"
     if post.get('languages'):
@@ -365,11 +378,35 @@ async def scrape_initial_command(client, message):
         
     await msg.edit_text(f"Successfully scraped and stored {len(posts)} posts!")
 
+async def update_db_command(client, message):
+    if message.from_user.id != OWNER_ID:
+        return
+        
+    msg = await message.reply_text("Auto-updating all legacy post names in DB...")
+    posts = await database.get_all_posts(skip=0, limit=1000)
+    updated = 0
+    for post in posts:
+        needs_update = False
+        for i, ep in enumerate(post.get('episodes', [])):
+            if ep.get('title', '').strip() in ["Watch/Download", "Download", "Watch & Download", ""]:
+                ep['title'] = f"Episode {i+1:02d}"
+                needs_update = True
+        for i, z in enumerate(post.get('zips', [])):
+            if z.get('title', '').strip() in ["Watch/Download", "Download", "Watch & Download", ""]:
+                z['title'] = f"ZIP {i+1:02d}"
+                needs_update = True
+        if needs_update:
+            await database.add_or_update_post(post)
+            updated += 1
+            
+    await msg.edit_text(f"Done! Updated {updated} posts to the new naming format.")
+
 def register_handlers(app: Client):
     app.add_handler(MessageHandler(start_command, filters.command("start")))
     app.add_handler(MessageHandler(set_lang_command, filters.command("set_lang")))
     app.add_handler(MessageHandler(list_command, filters.command("list")))
     app.add_handler(MessageHandler(scrape_initial_command, filters.command("scrape_initial")))
+    app.add_handler(MessageHandler(update_db_command, filters.command("update_db_names")))
     app.add_handler(MessageHandler(search_handler, filters.text))
     
     app.add_handler(CallbackQueryHandler(callback_close, filters.regex(r"^close$")))
