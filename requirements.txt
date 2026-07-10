@@ -1,0 +1,6 @@
+pyrogram
+motor
+beautifulsoup4
+aiohttp
+apscheduler
+lxml
