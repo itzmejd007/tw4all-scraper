@@ -190,3 +190,59 @@ async def scrape_archive_page(url):
             qualities = {"Available Links": react_sources}
             
     return qualities
+
+async def scrape_website_menu():
+    html = await fetch_html(BASE_URL)
+    if not html:
+        return []
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    menus = []
+    
+    for nav in soup.find_all('nav', class_='main-navigation'):
+        for ul in nav.find_all('ul'):
+            if 'menu' in (ul.get('class') or []):
+                for li in ul.find_all('li', recursive=False):
+                    a = li.find('a', recursive=False)
+                    if a:
+                        menu_item = {
+                            "name": a.get_text(strip=True),
+                            "url": a.get('href'),
+                            "sub": []
+                        }
+                        sub_ul = li.find('ul', recursive=False)
+                        if sub_ul:
+                            for sub_li in sub_ul.find_all('li', recursive=False):
+                                sub_a = sub_li.find('a', recursive=False)
+                                if sub_a:
+                                    menu_item["sub"].append({
+                                        "name": sub_a.get_text(strip=True),
+                                        "url": sub_a.get('href')
+                                    })
+                        menus.append(menu_item)
+                break 
+    return menus
+
+async def scrape_az_list(url):
+    html = await fetch_html(url)
+    if not html:
+        return []
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    content = soup.find('div', class_='entry-content')
+    posts = []
+    
+    if content:
+        for a_tag in content.find_all('a'):
+            href = a_tag.get('href', '')
+            title = a_tag.get_text(strip=True)
+            if "toonworld4all.me" in href and "/tag/" not in href and "/category/" not in href and href != url:
+                post_id = extract_post_id(href)
+                if post_id and len(title) > 2:
+                    posts.append({
+                        "post_id": post_id,
+                        "title": title,
+                        "url": href,
+                        "languages": extract_languages_from_title(title)
+                    })
+    return posts

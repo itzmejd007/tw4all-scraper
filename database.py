@@ -9,6 +9,7 @@ client = motor.motor_asyncio.AsyncIOMotorClient(DB_URL)
 db = client[DB_NAME]
 posts_collection = db["posts"]
 users_collection = db["users"]
+admins_collection = db["admins"]
 
 async def init_db():
     # Create indexes for faster search
@@ -81,3 +82,24 @@ async def get_all_users():
 async def get_users_by_language(language):
     cursor = users_collection.find({"language_preference": language})
     return await cursor.to_list(length=None)
+
+async def add_admin(user_id):
+    await admins_collection.update_one(
+        {"user_id": int(user_id)},
+        {"$set": {"user_id": int(user_id), "added_at": datetime.utcnow()}},
+        upsert=True
+    )
+
+async def remove_admin(user_id):
+    await admins_collection.delete_one({"user_id": int(user_id)})
+
+async def is_admin(user_id):
+    if int(user_id) == config.OWNER_ID:
+        return True
+    admin = await admins_collection.find_one({"user_id": int(user_id)})
+    return admin is not None
+
+async def get_all_admins():
+    cursor = admins_collection.find()
+    admins = await cursor.to_list(length=None)
+    return [a['user_id'] for a in admins]

@@ -387,23 +387,19 @@ async def callback_allsrc(client, callback_query):
     ]))
 
 async def scrape_initial_command(client, message):
-    if message.from_user.id != OWNER_ID:
-        await message.reply_text("Only owner can use this command.")
+    if not await database.is_admin(message.from_user.id):
+        await message.reply_text("Only owner/admin can use this command.")
         return
-    
-    msg = await message.reply_text("Scraping initial 20 posts from homepage [■■■□□□□□□]... This might take a minute.")
-    
-    posts = await scraper.scrape_homepage(limit=20)
-    for p in posts:
-        details = await scraper.scrape_post_details(p['url'])
-        if details:
-            p.update(details)
-        await database.add_or_update_post(p)
+        
+    msg = await message.reply_text("Scraping starting... This may take a while.")
+    posts = await scraper.scrape_search("a") 
+    for post in posts:
+        await database.add_or_update_post(post)
         
     await msg.edit_text(f"Successfully scraped and stored {len(posts)} posts!")
 
 async def update_db_command(client, message):
-    if message.from_user.id != OWNER_ID:
+    if not await database.is_admin(message.from_user.id):
         return
         
     msg = await message.reply_text("Auto-updating all legacy post names in DB...")
@@ -425,12 +421,267 @@ async def update_db_command(client, message):
             
     await msg.edit_text(f"Done! Updated {updated} posts to the new naming format.")
 
+async def add_admin_command(client, message):
+    if message.from_user.id != config.OWNER_ID:
+        await message.reply_text("Only the Bot Owner can add admins.")
+        return
+    
+    if len(message.command) < 2:
+        await message.reply_text("Usage: /add_admin <user_id>")
+        return
+        
+    try:
+        new_admin_id = int(message.command[1])
+        await database.add_admin(new_admin_id)
+        await message.reply_text(f"User `{new_admin_id}` has been added as an admin and given full control!")
+        
+        try:
+            await client.send_message(new_admin_id, "You have been promoted to Admin by the Owner! You now have full bot control.")
+        except:
+            pass
+    except ValueError:
+        await message.reply_text("Invalid user ID.")
+
+async def refresh_db_task(client, msg):
+    try:
+        posts = await database.get_all_posts(skip=0, limit=0)
+        updated = 0
+        total = len(posts)
+        
+        for p in posts:
+            details = await scraper.scrape_post_details(p['url'])
+            if details:
+                old_eps = len(p.get('episodes', []))
+                new_eps = len(details.get('episodes', []))
+                old_zips = len(p.get('zips', []))
+                new_zips = len(details.get('zips', []))
+                
+                if new_eps > old_eps or new_zips > old_zips:
+                    p.update(details)
+                    await database.add_or_update_post(p)
+                    updated += 1
+        
+        await msg.edit_text(f"🔄 **Full DB Refresh Complete!**\nChecked {total} posts.\nSuccessfully updated {updated} posts with new episodes/ZIPs.")
+    except Exception as e:
+        await msg.edit_text(f"Error during refresh: {e}")
+
+async def refresh_command(client, message):
+    if not await database.is_admin(message.from_user.id):
+        return
+        
+    msg = await message.reply_text("🔄 Starting full database background refresh. This will run silently and notify you when complete.")
+    asyncio.create_task(refresh_db_task(client, msg))
+
+WEBSITE_MENU = []
+
+async def menu_command(client, message):
+    if not await database.is_admin(message.from_user.id):
+        await message.reply_text("Only admins can access the scraper menu.")
+        return
+        
+    global WEBSITE_MENU
+    msg = await message.reply_text("Fetching website menu...")
+    WEBSITE_MENU = await scraper.scrape_website_menu()
+    
+    if not WEBSITE_MENU:
+        await msg.edit_text("Failed to fetch menu from website.")
+        return
+        
+    buttons = []
+    for i, m in enumerate(WEBSITE_MENU):
+        buttons.append([InlineKeyboardButton(m['name'], callback_data=f"menu_{i}")])
+        
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
+    await msg.edit_text("🗂 **Website Categories**\nSelect a category to browse or sync:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_menu(client, callback_query):
+    parts = callback_query.data.split("_")
+    menu_idx = int(parts[1])
+    
+    global WEBSITE_MENU
+    if not WEBSITE_MENU:
+        WEBSITE_MENU = await scraper.scrape_website_menu()
+        
+    if menu_idx >= len(WEBSITE_MENU):
+        return await callback_query.answer("Menu expired. Send /menu again.", show_alert=True)
+        
+    menu = WEBSITE_MENU[menu_idx]
+    
+    buttons = []
+    for i, sub in enumerate(menu.get('sub', [])):
+        buttons.append([InlineKeyboardButton(sub['name'], callback_data=f"subm_{menu_idx}_{i}")])
+        
+    buttons.append([InlineKeyboardButton("« Back to Main", callback_data="menumain")])
+    await callback_query.message.edit_text(f"🗂 **{menu['name']}**\nSelect a sub-category:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_menumain(client, callback_query):
+    global WEBSITE_MENU
+    buttons = []
+    for i, m in enumerate(WEBSITE_MENU):
+        buttons.append([InlineKeyboardButton(m['name'], callback_data=f"menu_{i}")])
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
+    await callback_query.message.edit_text("🗂 **Website Categories**\nSelect a category to browse or sync:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_submenu(client, callback_query):
+    parts = callback_query.data.split("_")
+    menu_idx = int(parts[1])
+    sub_idx = int(parts[2])
+    
+    global WEBSITE_MENU
+    menu = WEBSITE_MENU[menu_idx]
+    sub = menu['sub'][sub_idx]
+    
+    url = sub['url']
+    await callback_query.message.edit_text(f"Fetching posts from {sub['name']}...")
+    
+    # If it's a List page, trigger A-Z Sync
+    if 'list_' in url or '-list' in url:
+        posts = await scraper.scrape_az_list(url)
+        if not posts:
+            await callback_query.message.edit_text("No posts found or failed to parse A-Z list.")
+            return
+            
+        total = len(posts)
+        db_count = 0
+        new_posts = []
+        for p in posts:
+            exists = await database.get_post_by_id(p['post_id'])
+            if exists:
+                db_count += 1
+            else:
+                new_posts.append(p)
+                
+        text = f"🗃 **{sub['name']} (A-Z Sync)**\n\n"
+        text += f"Total Posts in List: {total}\n"
+        text += f"Posts already in DB: {db_count}\n"
+        text += f"New Posts to Scrape: {len(new_posts)}\n\n"
+        
+        # Save new posts to memory for sync callback
+        global AZ_SYNC_QUEUE
+        AZ_SYNC_QUEUE = new_posts
+        
+        buttons = []
+        if len(new_posts) > 0:
+            buttons.append([InlineKeyboardButton(f"🔄 Scrape New Posts ({len(new_posts)})", callback_data="azsync_new")])
+        buttons.append([InlineKeyboardButton("« Back", callback_data=f"menu_{menu_idx}")])
+        
+        await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        # Just a normal category browsing (future enhancement to list them page by page)
+        await callback_query.message.edit_text(f"🗃 **{sub['name']}**\nBrowsing standard categories inside the bot is coming soon. Please use search for now.\n\nLink: {url}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=f"menu_{menu_idx}")]]))
+
+AZ_SYNC_QUEUE = []
+
+async def azsync_task(client, msg):
+    global AZ_SYNC_QUEUE
+    queue = AZ_SYNC_QUEUE.copy()
+    AZ_SYNC_QUEUE = []
+    
+    total = len(queue)
+    success = 0
+    failed = []
+    
+    for i, p in enumerate(queue):
+        if i % 5 == 0:
+            try:
+                bar = "█" * int((i/total)*10) + "░" * (10 - int((i/total)*10))
+                await msg.edit_text(f"🔄 **Syncing Posts...**\n\nProgress: [{bar}] {i}/{total}\nScraping: {p['title']}")
+            except:
+                pass
+                
+        details = await scraper.scrape_post_details(p['url'])
+        if details:
+            p.update(details)
+            await database.add_or_update_post(p)
+            success += 1
+        else:
+            failed.append(p['url'])
+            
+    text = f"✅ **Sync Complete!**\n\nSuccessfully added: {success}/{total} posts."
+    if failed:
+        text += f"\n\nFailed to scrape {len(failed)} posts. Check logs."
+        print("Failed posts:", failed)
+        
+    await msg.edit_text(text)
+
+async def callback_azsync(client, callback_query):
+    await callback_query.answer("Starting background sync...", show_alert=False)
+    msg = await callback_query.message.edit_text("🔄 Preparing to scrape...")
+    asyncio.create_task(azsync_task(client, msg))
+
+async def massive_scrape_task(client, msg):
+    try:
+        await msg.edit_text("🔄 **Massive Scrape Started**\n\nFetching website menus to find all A-Z lists...")
+        menus = await scraper.scrape_website_menu()
+        
+        list_urls = []
+        for m in menus:
+            for sub in m.get('sub', []):
+                if 'list_' in sub['url'] or '-list' in sub['url']:
+                    list_urls.append(sub['url'])
+                    
+        await msg.edit_text(f"🔄 **Massive Scrape**\n\nFound {len(list_urls)} A-Z Lists. Fetching all posts from them...")
+        
+        all_posts = []
+        for url in list_urls:
+            posts = await scraper.scrape_az_list(url)
+            all_posts.extend(posts)
+            
+        # Deduplicate by URL
+        unique_posts = {p['url']: p for p in all_posts}.values()
+        total_posts = len(unique_posts)
+        
+        await msg.edit_text(f"🔄 **Massive Scrape**\n\nFound {total_posts} unique posts across all lists. Starting deep scrape...\nThis will run in the background. You can use the bot normally.")
+        
+        success = 0
+        failed = []
+        
+        for i, p in enumerate(unique_posts):
+            try:
+                details = await scraper.scrape_post_details(p['url'])
+                if details:
+                    p.update(details)
+                    await database.add_or_update_post(p)
+                    success += 1
+                else:
+                    failed.append(p['url'])
+            except Exception:
+                failed.append(p['url'])
+                
+            # Log progress every 50 posts
+            if i > 0 and i % 50 == 0:
+                print(f"Massive Scrape Progress: {i}/{total_posts}...")
+                
+        # Scrape complete
+        text = f"✅ **Massive Background Scrape Complete!**\n\nTotal Posts Found: {total_posts}\nSuccessfully Added/Updated: {success}\nFailed: {len(failed)}\n\n"
+        if failed:
+            text += "Some posts failed to scrape. Check the server logs for the full list."
+            print("FAILED MASSIVE SCRAPE LINKS:")
+            for f in failed:
+                print(f)
+                
+        await client.send_message(config.OWNER_ID, text)
+        
+    except Exception as e:
+        print(f"Massive scrape failed: {e}")
+        await client.send_message(config.OWNER_ID, f"❌ Massive scrape crashed: {e}")
+
+async def callback_massive_scrape_start(client, callback_query):
+    if not await database.is_admin(callback_query.from_user.id):
+        return
+    await callback_query.answer("Starting massive scrape...", show_alert=False)
+    msg = await callback_query.message.edit_text("Initializing massive scrape...")
+    asyncio.create_task(massive_scrape_task(client, msg))
+
 def register_handlers(app: Client):
     app.add_handler(MessageHandler(start_command, filters.command("start")))
     app.add_handler(MessageHandler(set_lang_command, filters.command("set_lang")))
     app.add_handler(MessageHandler(list_command, filters.command("list")))
     app.add_handler(MessageHandler(scrape_initial_command, filters.command("scrape_initial")))
     app.add_handler(MessageHandler(update_db_command, filters.command("update_db_names")))
+    app.add_handler(MessageHandler(add_admin_command, filters.command("add_admin")))
+    app.add_handler(MessageHandler(refresh_command, filters.command("refresh")))
+    app.add_handler(MessageHandler(menu_command, filters.command("menu")))
     app.add_handler(MessageHandler(search_handler, filters.text))
     
     app.add_handler(CallbackQueryHandler(callback_close, filters.regex(r"^close$")))
@@ -442,3 +693,8 @@ def register_handlers(app: Client):
     app.add_handler(CallbackQueryHandler(callback_quality, filters.regex(r"^qual_")))
     app.add_handler(CallbackQueryHandler(callback_source, filters.regex(r"^src_")))
     app.add_handler(CallbackQueryHandler(callback_allsrc, filters.regex(r"^allsrc_")))
+    app.add_handler(CallbackQueryHandler(callback_menu, filters.regex(r"^menu_")))
+    app.add_handler(CallbackQueryHandler(callback_menumain, filters.regex(r"^menumain$")))
+    app.add_handler(CallbackQueryHandler(callback_submenu, filters.regex(r"^subm_")))
+    app.add_handler(CallbackQueryHandler(callback_azsync, filters.regex(r"^azsync_new$")))
+    app.add_handler(CallbackQueryHandler(callback_massive_scrape_start, filters.regex(r"^massive_scrape_start$")))

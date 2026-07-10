@@ -1,0 +1,215 @@
+{
+  "data": {
+    "error": false,
+    "message": "Episode data fetched successfully",
+    "data": {
+      "updated_at": "2026-06-29 23:43:49",
+      "metadata": {
+        "slug": "blue-box",
+        "season": 1,
+        "episode": 1,
+        "type": "EPISODE",
+        "encoder": {
+          "image": "https://secure.gravatar.com/avatar/c3d8378df19d3b8d4154fea4d0ecfed8?s=280&d=wavatar&r=pg",
+          "name": "Drago",
+          "id": "TW"
+        },
+        "show": "Blue Box",
+        "air": "2024-10-03",
+        "name": "Chinatsu Senpai",
+        "overview": "Despite a few heart-fluttering encounters, Taiki doubts his crush Chinatsu even knows his name. Later, shocking news forces him to make a bold move.",
+        "runtime": 24,
+        "poster": "https://image.tmdb.org/t/p/w300/iP1wh8pjHPOP7S7DewTa4KDDgVO.jpg"
+      },
+      "encodes": [
+        {
+          "resolution": "480p",
+          "is_hq": false,
+          "bit_depth": 8,
+          "codec": "H.264",
+          "size": 114962580,
+          "readable": {
+            "codec": "480p x264",
+            "size": "109.64 MB"
+          },
+          "files": [
+            {
+              "host": "HubCloud",
+              "icon": "https://i.ibb.co/Jp75pW8/white.png",
+              "link": "/redirect/1a357b18381018343fe1e163feda6887943030502fc7d045f87a1c141a494d839cbc7a078873e946797f8bb07933bbfd23f44f6b5158e756bbdae23e881c14554a9dd675ceceeb37df9845bbe8a6e1d75ad0",
+              "short": "hubcloud.cx"
+            },
+            {
+              "host": "Filepress",
+              "icon": "https://i.ibb.co/jV5R5kf/filepress.png",
+              "link": "/redirect/d269b34f9cb903fa813068fd7809e5a1cd910c74f569337fe4dcbac587e3b35c361697de150d564754f1ed97c165d559279c784434bf46cb96908a1681f3eab071a8ee3a6148f85c560e1bb49383b0fef9bf93f01e0320420fa68323e0e6733604e8",
+              "short": "new1.filepress.baby"
+            },
+            {
+              "host": "GDFlix",
+              "icon": "https://i.ibb.co/vCzLm0R9/drive.png",
+              "link": "/redirect/7f1494e0848512c8f8dea8c4ea9b135cae1699627b67e3922a87a02c108adf36621e32385fa60d6c96e33e03fdd4b1f3b6e9d2b0654d4ca39ea41f62084846ea4b90d06934e33eafd4bd908eb879c689",
+              "short": "gdflix.dev"
+            },
+            {
+              "host": "MEGA",
+              "icon": "https://mega.nz/favicon.ico?v=3",
+              "link": "/redirect/fb14a183cd2dc158299ea2afbcfc31b68fb2eac429fbc053963604263abf57396639467cfb8826f0ec42ef9d44152232a7669fc6ca41ab8646e1db99d7f8adefbcc75cfa9ad63743b623751fdefe243e764b32ccd1abc1440bbf22ac96c632ce5f8f7c6c5ea01888353ac055efa0993768fd",
+              "short": "mega.nz"
+            }
+          ]
+        },
+        {
+          "resolution": "720p",
+          "is_hq": false,
+          "bit_depth": 8,
+          "codec": "H.264",
+          "size": 194342953,
+          "readable": {
+            "codec": "720p x264",
+            "size": "185.34 MB"
+          },
+          "files": [
+            {
+              "host": "HubCloud",
+              "icon": "https://i.ibb.co/Jp75pW8/white.png",
+              "link": "/redirect/7da51e255b7b88f583d626aba5a5114c8ba2afe041b636daedf0d0fd9521b8858e51eee78d3257b9fb19ffec74e90e1dd68bca65f1b3c37ba58de1f6a0d9fa465b2aa7e6fe5a09e3e8287c5a6d64cf474bcc",
+              "short": "hubcloud.cx"
+            },
+            {
+              "host": "Filepress",
+              "icon": "https://i.ibb.co/jV5R5kf/filepress.png",
+              "link": "/redirect/7085699f38b1aeda7cc59bcc5ffb5b339ea700463b36d8096c7c791fc4343361c02853a079bd584aa744589b545f2b71dc990be21edfc74918cfc5e65e35d88603811f90484151a51940b80372623070177c924aa3275aabd430c5e891155374a321",
+              "short": "new1.filepress.baby"
+            },
+            {
+              "host": "GDFlix",
+              "icon": "https://i.ibb.co/vCzLm0R9/drive.png",
+              "link": "/redirect/22790ec5aa7b62d19f9e1fd543fcbdd409fa2cce4867e69d9cd2d8ccdcb8295a10006763af1fa0d2e6b8b828ee1199273a93c527af9299b6325dca5dcae6d9f776070d9eb184c247ec069f9107e032a5",
+              "short": "gdflix.dev"
+            },
+            {
+              "host": "MEGA",
+              "icon": "https://mega.nz/favicon.ico?v=3",
+              "link": "/redirect/0037c1c912be71cd922597a0d02ff3358fbe6b0312495139f9d2436439ab5195188effb2f5b7a0f5554fec14d5b28a8a0d0fd8e6b720bed1b322127aa03554cd73328cbe05df12a64bb5010dff807e7423618999b0e0e20876327d4f76f7fdb8938ccd3057225c2fcbb3f917381f60052ce0",
+              "short": "mega.nz"
+            }
+          ]
+        },
+        {
+          "resolution": "720p",
+          "is_hq": false,
+          "bit_depth": 10,
+          "codec": "H.265",
+          "size": 142975619,
+          "readable": {
+            "codec": "720p HEVC 10bit",
+            "size": "136.35 MB"
+          },
+          "files": [
+            {
+              "host": "HubCloud",
+              "icon": "https://i.ibb.co/Jp75pW8/white.png",
+              "link": "/redirect/503d1411a6364cf118b891e4c0cd8a6eb7de7f8d65c691d3d9015490d4e8246b0ba8bae1720cde19774d441136804bf0572401fd8a91918477fb3fa48494666f7152a9e82a1438983b02354ed2177f5669be",
+              "short": "hubcloud.cx"
+            },
+            {
+              "host": "Filepress",
+              "icon": "https://i.ibb.co/jV5R5kf/filepress.png",
+              "link": "/redirect/04e8aa9e3f6b44da26556fda4cf70e7fad929673330a51e014a5760a7bb1dc5e2e53aa46143385a3a6f0ce703b7ea667f5f88e1a83d9e3d1ba636a4156f1175e6bd68b627003d75f5d7fc957cb540303d9fc60b3118513f58b67c1b3b4e1729d3ab6",
+              "short": "new1.filepress.baby"
+            },
+            {
+              "host": "GDFlix",
+              "icon": "https://i.ibb.co/vCzLm0R9/drive.png",
+              "link": "/redirect/8cf58f351c7b217c1d2af69a53acfdd87afa5001cc05091f5e91fbe3165cc6634f44021c2dd4ce6b0ae84eb897559bddd7372a6234f06a8b4a6d3e4d5f53fa5e0e13e99d8851da1cf09d5f3d819df4d1",
+              "short": "gdflix.dev"
+            },
+            {
+              "host": "MEGA",
+              "icon": "https://mega.nz/favicon.ico?v=3",
+              "link": "/redirect/d8d5fa8f8e93db8b7c2f119b854749f600b4324124edcb1beedde7e584a3400db52dfc0002e84d027ec775d14d9135b232664a0df1ccd4c371ffd62c5430e6382be432440c46ea6f230938310a3e123b6e946f1a4e3dc6d11536530a435e4e0e1ac50ca267d358929e472ae6b51109be1a97",
+              "short": "mega.nz"
+            }
+          ]
+        },
+        {
+          "resolution": "1080p",
+          "is_hq": false,
+          "bit_depth": 10,
+          "codec": "H.265",
+          "size": 317818664,
+          "readable": {
+            "codec": "1080p HEVC 10bit",
+            "size": "303.10 MB"
+          },
+          "files": [
+            {
+              "host": "HubCloud",
+              "icon": "https://i.ibb.co/Jp75pW8/white.png",
+              "link": "/redirect/270a8b6334c9ec40e47a786b82b8e5358700679a475a1c99ce2de7f41a39a97a7f54701572f45dfd7e3146f79580e51bdd1f8924fe067b1e3b8e5fcfa0cb83c61a6af372df7a3909ccec5cbdb2655f8cd701",
+              "short": "hubcloud.cx"
+            },
+            {
+              "host": "Filepress",
+              "icon": "https://i.ibb.co/jV5R5kf/filepress.png",
+              "link": "/redirect/246f90ab93515a41bd3801e66b574dfde4979fb065436f628b2ced6ad12ba2f57cbfc81fd661595e44dbc25acb3c0be75ccc78c57b7ae0736d38474f14e3f14a103d44bac1de85d2e47997843eb93286d94cc2acfdb7cc6a63a85009899899b86e77",
+              "short": "new1.filepress.baby"
+            },
+            {
+              "host": "GDFlix",
+              "icon": "https://i.ibb.co/vCzLm0R9/drive.png",
+              "link": "/redirect/560c2e9d4dee0513263f2337cd89350b62a87663a0d1c05a40cadc79fad7a62c434c90c51c632dafa13a2ac5f1bb32664febfdd50b1efbd1c82c92cfe478a0f3252614601c32455691657de315cabef0",
+              "short": "gdflix.dev"
+            },
+            {
+              "host": "MEGA",
+              "icon": "https://mega.nz/favicon.ico?v=3",
+              "link": "/redirect/c4fd8151f4d226ea915db6ba5a7c60e90af7fa79f5fd2ea4b8008d8b37ad7eed4613c8fb179128706b95bd2e642c310e7e68647b8c83734f6210685d71b7979913da0ffc9f4ad16ae9e77df7b05d87cfdee9763c9ddeded476f7680cd290c563db1cf23684b1c9661c034c07aa1921bbf3d9",
+              "short": "mega.nz"
+            }
+          ]
+        },
+        {
+          "resolution": "1080p",
+          "is_hq": true,
+          "bit_depth": 10,
+          "codec": "H.265",
+          "size": 1018625021,
+          "readable": {
+            "codec": "1080p HEVC 10bit [HQ]",
+            "size": "971.44 MB"
+          },
+          "files": [
+            {
+              "host": "HubCloud",
+              "icon": "https://i.ibb.co/Jp75pW8/white.png",
+              "link": "/redirect/261497be0d9743a55dea80dd5bf305a5533cc49d4aa8a788f064f5188fef76c5bbfb3273b22879287767461de6a0f58943cb34f7dc67058c1ca1c48d509099a0e9af9c6d50067bbad249b30416716c637c4d",
+              "short": "hubcloud.cx"
+            },
+            {
+              "host": "Filepress",
+              "icon": "https://i.ibb.co/jV5R5kf/filepress.png",
+              "link": "/redirect/43f7f54c7996cd190f523d43c235d24118e4da38d31473db4f1405f8f6018baf836e65efdc3801ce0ed67d2aca1a6636997c16abd5bca2f82a14a96ed5da85e60f5390d6e7bc1740cddfaecfd3cb4501b62863bfe522c24a967971af0fdf75e4ed79",
+              "short": "new1.filepress.baby"
+            },
+            {
+              "host": "GDFlix",
+              "icon": "https://i.ibb.co/vCzLm0R9/drive.png",
+              "link": "/redirect/0e33354ace62b697121024a5c824ce80b09f11dfe8f9abacd4813a4b62109d05502bb2dbb60156b498bb730243310544459a8820a9579a70b89dc29d62896b0819daab464d609fd2e9adcc787015d176",
+              "short": "gdflix.dev"
+            },
+            {
+              "host": "MEGA",
+              "icon": "https://mega.nz/favicon.ico?v=3",
+              "link": "/redirect/0a0cf8cdbecec943f432524d68346a799aecaec5868c647385580e652699690e0a2aa280157a7469305d3d72e237eee26a6a72bf1ceda238d2109e948e1e3207409d9076b4728e0bdcb49364f015e25f97edab1acd0f36f2382af264dd389da73a802b9fb6160ad0797accc7cbcdb6486400",
+              "short": "mega.nz"
+            }
+          ]
+        }
+      ],
+      "streams": []
+    }
+  },
+  "userSelectedSystem": "24hour"
+}
