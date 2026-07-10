@@ -1,8 +1,8 @@
 # Telegram Bot Configuration
 BOT_TOKEN = "8380940816:AAF0pJrqrFVOCs_0n2lQMynyeXlY788ennA"
 OWNER_ID = 1357978966
-API_ID = "2040"  # Dummy for Pyrogram if not using real user API
-API_HASH = "b18441a1ff607e10a989891a5462e627"  # Dummy for Pyrogram
+API_ID = "6"
+API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
 
 # Logging Configuration
 LOG_CHANNEL_ID = None  # Example: -100123456789. Set to None to disable.
