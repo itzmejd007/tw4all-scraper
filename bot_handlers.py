@@ -12,8 +12,8 @@ USER_STATES = {}
 def create_post_buttons(posts):
     buttons = []
     for post in posts:
-        # Use MongoDB _id instead of long post_id to avoid 64-byte callback limit
         buttons.append([InlineKeyboardButton(post['title'], callback_data=f"post_{str(post['_id'])}")])
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
     return InlineKeyboardMarkup(buttons)
 
 async def start_command(client, message):
@@ -62,8 +62,9 @@ async def send_post_list(client, chat_id, page=1, lang="all", edit_msg=None):
         text += f"Filter: {lang}\n"
     text += f"Page {page} of {max(1, (total + limit - 1) // limit)}"
     
-    markup = create_post_buttons(posts)
-    buttons = markup.inline_keyboard
+    buttons = []
+    for post in posts:
+        buttons.append([InlineKeyboardButton(post['title'], callback_data=f"post_{str(post['_id'])}")])
     
     # Pagination row
     nav_row = []
@@ -78,6 +79,7 @@ async def send_post_list(client, chat_id, page=1, lang="all", edit_msg=None):
     buttons.append([InlineKeyboardButton("🔍 Filter by Language", callback_data=f"filter_{page}_{lang}")])
     if lang != "all":
         buttons.append([InlineKeyboardButton("❌ Clear Filter", callback_data=f"listpg_1_all")])
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
         
     markup = InlineKeyboardMarkup(buttons)
     
@@ -94,7 +96,6 @@ async def search_handler(client, message):
     if keyword.startswith('/'):
         return
         
-    # Check if user is in conversational state
     state = USER_STATES.get(message.from_user.id)
     if state and state['type'] == 'filter':
         lang = keyword.capitalize()
@@ -103,7 +104,6 @@ async def search_handler(client, message):
         except:
             pass
         del USER_STATES[message.from_user.id]
-        # Send fresh list
         await send_post_list(client, message.chat.id, page=1, lang=lang)
         return
     
@@ -114,22 +114,18 @@ async def search_handler(client, message):
         await msg.edit_text(f"Search results for '{keyword}':", reply_markup=create_post_buttons(posts))
         return
         
-    # Live Search Fallback
     await msg.edit_text(f"'{keyword}' not found in DB.\nSearching toonworld4all.me [■■■□□□□□□]...")
     scraped_posts = await scraper.scrape_search(keyword, limit=10)
     
     if not scraped_posts:
-        await msg.edit_text("No posts found on website either.")
+        await msg.edit_text("No posts found on website either.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]]))
         return
         
-    # Save newly scraped posts to DB
     for p in scraped_posts:
         await database.add_or_update_post(p)
         
-    # Retrieve them again so they have _id for callbacks
     posts_after_scrape = await database.search_posts(keyword)
     if not posts_after_scrape:
-        # Fallback if DB indexing takes a second
         await asyncio.sleep(1)
         posts_after_scrape = await database.search_posts(keyword)
         
@@ -152,6 +148,9 @@ async def callback_filter(client, callback_query):
     }
     await callback_query.answer()
 
+async def callback_close(client, callback_query):
+    await callback_query.message.delete()
+
 async def callback_post(client, callback_query):
     post_id = callback_query.data.split("post_")[1]
     post = await database.get_post_by_mongo_id(post_id)
@@ -161,7 +160,7 @@ async def callback_post(client, callback_query):
         return
     
     if 'episodes' not in post or (len(post.get('episodes', [])) == 0 and len(post.get('zips', [])) == 0):
-        await callback_query.message.edit_text("Loading details from website [■■■□□□□□□]...")
+        await callback_query.answer("Scraping details...", show_alert=False)
         details = await scraper.scrape_post_details(post['url'])
         if details:
             post.update(details)
@@ -178,9 +177,11 @@ async def callback_post(client, callback_query):
     
     buttons = []
     if ep_count > 0:
-        buttons.append([InlineKeyboardButton("Episodes", callback_data=f"list_ep_{post_id}")])
+        buttons.append([InlineKeyboardButton("Episodes", callback_data=f"list_ep_{post_id}_0")])
     if zip_count > 0:
-        buttons.append([InlineKeyboardButton("ZIP Files", callback_data=f"list_zip_{post_id}")])
+        buttons.append([InlineKeyboardButton("ZIP Files", callback_data=f"list_zip_{post_id}_0")])
+    
+    buttons.append([InlineKeyboardButton("« Back to List", callback_data=f"listpg_1_all"), InlineKeyboardButton("❌ Close", callback_data="close")])
     
     if not buttons:
         text += "\n\nNo download links found."
@@ -188,22 +189,46 @@ async def callback_post(client, callback_query):
     await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 async def callback_list(client, callback_query):
-    action, ptype, post_id = callback_query.data.split("_")
-    post = await database.get_post_by_mongo_id(post_id)
+    # list_{ptype}_{post_id}_{page}
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    page = int(parts[3]) if len(parts) > 3 else 0
     
+    post = await database.get_post_by_mongo_id(post_id)
     if not post:
         await callback_query.answer("Post not found.", show_alert=True)
         return
     
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    limit = 20
+    start = page * limit
+    end = start + limit
+    
+    page_items = items[start:end]
     
     buttons = []
-    for i, item in enumerate(items[:90]):
-        buttons.append([InlineKeyboardButton(item['title'], callback_data=f"sel_{ptype}_{post_id}_{i}")])
+    row = []
+    for i, item in enumerate(page_items):
+        idx = start + i
+        row.append(InlineKeyboardButton(item['title'], callback_data=f"sel_{ptype}_{post_id}_{idx}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+        
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"list_{ptype}_{post_id}_{page-1}"))
+    if end < len(items):
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"list_{ptype}_{post_id}_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton("« Back", callback_data=f"post_{post_id}")])
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"post_{post_id}"), InlineKeyboardButton("❌ Close", callback_data="close")])
     
-    await callback_query.message.edit_text("Select:", reply_markup=InlineKeyboardMarkup(buttons))
+    await callback_query.message.edit_text(f"**{post['title']}**\nSelect an item:", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def callback_select(client, callback_query):
     parts = callback_query.data.split("_")
@@ -220,21 +245,24 @@ async def callback_select(client, callback_query):
     item = items[index]
     archive_url = item['url']
     
-    await callback_query.message.edit_text("Fetching available qualities [■■■□□□□□□]...")
+    await callback_query.answer("Fetching qualities...", show_alert=False)
     qualities = await scraper.scrape_archive_page(archive_url)
+    
+    # Calculate what page we were on to go back correctly
+    page = index // 20
     
     if not qualities:
         await callback_query.message.edit_text("No qualities found for this link.", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}")]]))
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}_{page}")]]))
         return
     
     buttons = []
     for q_name in qualities.keys():
-        short_q = q_name[:20]
+        short_q = q_name[:30]
         buttons.append([InlineKeyboardButton(short_q, callback_data=f"qual_{ptype}_{post_id}_{index}_{list(qualities.keys()).index(q_name)}")])
     
-    buttons.append([InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}")])
-    await callback_query.message.edit_text("Select Quality:", reply_markup=InlineKeyboardMarkup(buttons))
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}_{page}"), InlineKeyboardButton("❌ Close", callback_data="close")])
+    await callback_query.message.edit_text(f"**{post['title']}**\n{item['title']}\nSelect Quality:", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def callback_quality(client, callback_query):
     parts = callback_query.data.split("_")
@@ -248,7 +276,7 @@ async def callback_quality(client, callback_query):
     item = items[index]
     archive_url = item['url']
     
-    await callback_query.message.edit_text("Loading sources [■■■□□□□□□]...")
+    await callback_query.answer("Loading sources...", show_alert=False)
     
     qualities = await scraper.scrape_archive_page(archive_url)
     q_keys = list(qualities.keys())
@@ -260,24 +288,24 @@ async def callback_quality(client, callback_query):
     sources = qualities[q_name]
     
     buttons = []
-    for i, src in enumerate(sources):
-        src_name = src['source'][:20]
-        buttons.append([InlineKeyboardButton(src_name, callback_data=f"src_{ptype}_{post_id}_{index}_{q_index}_{i}")])
+    for src in sources:
+        # Use URL button directly as requested
+        src_name = src['source'][:30]
+        buttons.append([InlineKeyboardButton(src_name, url=src['url'])])
     
     if len(sources) > 1:
-        buttons.append([InlineKeyboardButton("All Sources", callback_data=f"src_{ptype}_{post_id}_{index}_{q_index}_all")])
+        buttons.append([InlineKeyboardButton("📜 Get All Source Links", callback_data=f"allsrc_{ptype}_{post_id}_{index}_{q_index}")])
     
-    buttons.append([InlineKeyboardButton("« Back", callback_data=f"sel_{ptype}_{post_id}_{index}")])
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"sel_{ptype}_{post_id}_{index}"), InlineKeyboardButton("❌ Close", callback_data="close")])
     
-    await callback_query.message.edit_text(f"Selected: {q_name}\n\nSelect Source:", reply_markup=InlineKeyboardMarkup(buttons))
+    await callback_query.message.edit_text(f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\nSelect Source (Long press to copy address):", reply_markup=InlineKeyboardMarkup(buttons))
 
-async def callback_source(client, callback_query):
+async def callback_allsrc(client, callback_query):
     parts = callback_query.data.split("_")
     ptype = parts[1]
     post_id = parts[2]
     index = int(parts[3])
     q_index = int(parts[4])
-    s_index = parts[5]
     
     post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
@@ -289,16 +317,14 @@ async def callback_source(client, callback_query):
     sources = qualities[q_name]
     
     text = f"**{post['title']}**\n{item['title']} - {q_name}\n\n"
-    
-    if s_index == 'all':
-        for src in sources:
-            text += f"**{src['source']}**: {src['url']}\n"
-    else:
-        src = sources[int(s_index)]
-        text += f"**{src['source']}**: {src['url']}\n"
+    for src in sources:
+        text += f"**{src['source']}**: `{src['url']}`\n\n"
         
-    await callback_query.message.edit_text(text)
-    
+    await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("« Back", callback_data=f"qual_{ptype}_{post_id}_{index}_{q_index}")],
+        [InlineKeyboardButton("❌ Close", callback_data="close")]
+    ]))
+
 async def scrape_initial_command(client, message):
     if message.from_user.id != OWNER_ID:
         await message.reply_text("Only owner can use this command.")
@@ -322,10 +348,11 @@ def register_handlers(app: Client):
     app.add_handler(MessageHandler(scrape_initial_command, filters.command("scrape_initial")))
     app.add_handler(MessageHandler(search_handler, filters.text))
     
+    app.add_handler(CallbackQueryHandler(callback_close, filters.regex(r"^close$")))
     app.add_handler(CallbackQueryHandler(callback_listpg, filters.regex(r"^listpg_")))
     app.add_handler(CallbackQueryHandler(callback_filter, filters.regex(r"^filter_")))
     app.add_handler(CallbackQueryHandler(callback_post, filters.regex(r"^post_")))
     app.add_handler(CallbackQueryHandler(callback_list, filters.regex(r"^list_")))
     app.add_handler(CallbackQueryHandler(callback_select, filters.regex(r"^sel_")))
     app.add_handler(CallbackQueryHandler(callback_quality, filters.regex(r"^qual_")))
-    app.add_handler(CallbackQueryHandler(callback_source, filters.regex(r"^src_")))
+    app.add_handler(CallbackQueryHandler(callback_allsrc, filters.regex(r"^allsrc_")))

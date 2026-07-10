@@ -99,16 +99,16 @@ async def scrape_post_details(url):
     if content:
         for a_tag in content.find_all('a'):
             href = a_tag.get('href', '')
-            text = a_tag.get_text(strip=True)
             if 'archive.toonworld4all.me/episode' in href:
-                # E.g. Episode 1, Watch/Download
+                ep_num = len(episodes) + 1
                 episodes.append({
-                    "title": text or f"Episode {len(episodes)+1}",
+                    "title": f"Episode {ep_num:02d}",
                     "url": href
                 })
             elif 'archive.toonworld4all.me/zip' in href:
+                zip_num = len(zips) + 1
                 zips.append({
-                    "title": text or f"ZIP {len(zips)+1}",
+                    "title": f"ZIP {zip_num:02d}",
                     "url": href
                 })
                 
@@ -126,31 +126,43 @@ async def scrape_archive_page(url):
     
     soup = BeautifulSoup(html, 'html.parser')
     
-    # The structure: h3 contains quality, under it h4 has source name, and redirect link is in a
     qualities = {}
-    current_quality = None
+    current_quality = "Available Links"
     
+    # Legacy parser
     for tag in soup.find_all(['h3', 'h4', 'a']):
         if tag.name == 'h3':
             current_quality = tag.get_text(strip=True)
             if current_quality not in qualities:
                 qualities[current_quality] = []
-        elif tag.name == 'h4':
-            # Could be source name
-            pass
         elif tag.name == 'a':
             href = tag.get('href', '')
             if href.startswith('/redirect/'):
-                # Extract source name from parent or previous h4 if possible
-                # In archive page, text might be 'DOWNLOAD' and parent might have source text
                 parent_text = tag.parent.get_text(strip=True).replace('DOWNLOAD', '').strip()
                 source_name = parent_text if parent_text else "Direct Link"
                 
                 full_redirect_url = f"https://archive.toonworld4all.me{href}"
-                if current_quality:
-                    qualities[current_quality].append({
-                        "source": source_name,
-                        "url": full_redirect_url
-                    })
-    
+                if current_quality not in qualities:
+                    qualities[current_quality] = []
+                qualities[current_quality].append({
+                    "source": source_name,
+                    "url": full_redirect_url
+                })
+                
+    # React App parser fallback
+    if len(qualities) <= 1 and (current_quality not in qualities or not qualities[current_quality]):
+        react_sources = []
+        for a_tag in soup.find_all('a'):
+            href = a_tag.get('href', '')
+            if href.startswith('/redirect/'):
+                parent = a_tag.parent
+                h4 = parent.find('h4')
+                source_name = h4.get_text(strip=True) if h4 else 'Direct Link'
+                react_sources.append({
+                    'source': source_name,
+                    'url': 'https://archive.toonworld4all.me' + href
+                })
+        if react_sources:
+            qualities = {"Available Links": react_sources}
+            
     return qualities
