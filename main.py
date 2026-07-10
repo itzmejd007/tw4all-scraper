@@ -8,14 +8,14 @@ import config
 if not config.BOT_TOKEN:
     print("WARNING: BOT_TOKEN is not set in config.py!")
 
-app = Client(
-    "tw4all_scraper_bot_session",
-    api_id=config.API_ID,
-    api_hash=config.API_HASH,
-    bot_token=config.BOT_TOKEN
-)
-
 async def main():
+    app = Client(
+        "tw4all_scraper_bot_session",
+        api_id=config.API_ID,
+        api_hash=config.API_HASH,
+        bot_token=config.BOT_TOKEN
+    )
+    
     print("Initializing Database...")
     await database.init_db()
     

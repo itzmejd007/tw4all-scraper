@@ -1,8 +1,8 @@
 # Telegram Bot Configuration
 BOT_TOKEN = "8380940816:AAF0pJrqrFVOCs_0n2lQMynyeXlY788ennA"
 OWNER_ID = 1357978966
-API_ID = "6"
-API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+API_ID = "20239261"
+API_HASH = "af61dab399ed3220a3a81570b56bd29d"
 
 # Logging Configuration
 LOG_CHANNEL_ID = None  # Example: -100123456789. Set to None to disable.
