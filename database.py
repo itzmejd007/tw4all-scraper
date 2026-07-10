@@ -31,6 +31,28 @@ async def add_or_update_post(post_data):
 async def get_post_by_id(post_id):
     return await posts_collection.find_one({"post_id": post_id})
 
+from bson.objectid import ObjectId
+
+async def get_post_by_mongo_id(oid_str):
+    try:
+        return await posts_collection.find_one({"_id": ObjectId(oid_str)})
+    except:
+        return None
+
+async def get_all_posts(skip=0, limit=10):
+    cursor = posts_collection.find().sort("created_at", -1).skip(skip).limit(limit)
+    return await cursor.to_list(length=limit)
+    
+async def get_posts_by_language(language, skip=0, limit=10):
+    cursor = posts_collection.find({"languages": language}).sort("created_at", -1).skip(skip).limit(limit)
+    return await cursor.to_list(length=limit)
+
+async def count_all_posts():
+    return await posts_collection.count_documents({})
+    
+async def count_posts_by_language(language):
+    return await posts_collection.count_documents({"languages": language})
+
 async def search_posts(keyword, limit=10):
     # Regex search for partial matching
     regex_pattern = f".*{keyword}.*"

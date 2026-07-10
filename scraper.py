@@ -57,6 +57,31 @@ async def scrape_homepage(limit=10):
                     })
     return posts
 
+async def scrape_search(keyword, limit=5):
+    search_url = f"{BASE_URL}?s={keyword.replace(' ', '+')}"
+    html = await fetch_html(search_url)
+    if not html:
+        return []
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    posts = []
+    
+    for h2 in soup.find_all('h2'):
+        a_tag = h2.find('a')
+        if a_tag and a_tag.get('href'):
+            url = a_tag.get('href')
+            title = a_tag.get_text(strip=True)
+            if "toonworld4all.me" in url and "/tag/" not in url and "/category/" not in url:
+                post_id = extract_post_id(url)
+                if post_id and len(posts) < limit:
+                    posts.append({
+                        "post_id": post_id,
+                        "title": title,
+                        "url": url,
+                        "languages": extract_languages_from_title(title)
+                    })
+    return posts
+
 async def scrape_post_details(url):
     html = await fetch_html(url)
     if not html:

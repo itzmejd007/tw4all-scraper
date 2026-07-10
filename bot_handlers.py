@@ -7,15 +7,16 @@ import asyncio
 import config
 
 OWNER_ID = config.OWNER_ID
+USER_STATES = {}
 
 def create_post_buttons(posts):
     buttons = []
     for post in posts:
-        buttons.append([InlineKeyboardButton(post['title'], callback_data=f"post_{post['post_id'][:40]}")])
+        # Use MongoDB _id instead of long post_id to avoid 64-byte callback limit
+        buttons.append([InlineKeyboardButton(post['title'], callback_data=f"post_{str(post['_id'])}")])
     return InlineKeyboardMarkup(buttons)
 
 async def start_command(client, message):
-    print("Received /start command!")
     await database.add_or_update_user(message.from_user.id, {
         "user_id": message.from_user.id,
         "first_name": message.from_user.first_name,
@@ -24,6 +25,7 @@ async def start_command(client, message):
     await message.reply_text(
         "Welcome to ToonWorld4All Bot!\n\n"
         "Send me any keyword (e.g. 'naruto') to search for anime/cartoons.\n"
+        "Use /list to see all available posts in the database.\n"
         "Use /set_lang <language> to get notifications for specific languages (e.g., /set_lang Tamil)."
     )
 
@@ -36,36 +38,130 @@ async def set_lang_command(client, message):
     await database.add_or_update_user(message.from_user.id, {"language_preference": lang})
     await message.reply_text(f"Language preference set to: {lang}. You will be notified when new posts with this language are added.")
 
+async def send_post_list(client, chat_id, page=1, lang="all", edit_msg=None):
+    limit = 10
+    skip = (page - 1) * limit
+    
+    if lang == "all":
+        posts = await database.get_all_posts(skip=skip, limit=limit)
+        total = await database.count_all_posts()
+    else:
+        posts = await database.get_posts_by_language(lang, skip=skip, limit=limit)
+        total = await database.count_posts_by_language(lang)
+        
+    if not posts and page == 1:
+        text = f"No posts found." if lang == "all" else f"No posts found for language: {lang}."
+        if edit_msg:
+            await edit_msg.edit_text(text)
+        else:
+            await client.send_message(chat_id, text)
+        return
+        
+    text = f"📚 **Database Posts**\nTotal: {total}\n"
+    if lang != "all":
+        text += f"Filter: {lang}\n"
+    text += f"Page {page} of {max(1, (total + limit - 1) // limit)}"
+    
+    markup = create_post_buttons(posts)
+    buttons = markup.inline_keyboard
+    
+    # Pagination row
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"listpg_{page-1}_{lang}"))
+    if skip + limit < total:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"listpg_{page+1}_{lang}"))
+    if nav_row:
+        buttons.append(nav_row)
+        
+    # Filter row
+    buttons.append([InlineKeyboardButton("🔍 Filter by Language", callback_data=f"filter_{page}_{lang}")])
+    if lang != "all":
+        buttons.append([InlineKeyboardButton("❌ Clear Filter", callback_data=f"listpg_1_all")])
+        
+    markup = InlineKeyboardMarkup(buttons)
+    
+    if edit_msg:
+        await edit_msg.edit_text(text, reply_markup=markup)
+    else:
+        await client.send_message(chat_id, text, reply_markup=markup)
+
+async def list_command(client, message):
+    await send_post_list(client, message.chat.id, page=1, lang="all")
+
 async def search_handler(client, message):
     keyword = message.text.strip()
     if keyword.startswith('/'):
         return
-    
-    msg = await message.reply_text("Searching...")
-    posts = await database.search_posts(keyword)
-    
-    if not posts:
-        await msg.edit_text("No posts found in database. Trying to scrape latest as fallback...")
-        latest = await database.get_latest_posts(5)
-        if latest:
-            await msg.edit_text("No exact match. Here are latest posts:", reply_markup=create_post_buttons(latest))
-        else:
-            await msg.edit_text("No posts found.")
+        
+    # Check if user is in conversational state
+    state = USER_STATES.get(message.from_user.id)
+    if state and state['type'] == 'filter':
+        lang = keyword.capitalize()
+        try:
+            await client.delete_messages(message.chat.id, [message.id, state['prompt_msg_id']])
+        except:
+            pass
+        del USER_STATES[message.from_user.id]
+        # Send fresh list
+        await send_post_list(client, message.chat.id, page=1, lang=lang)
         return
     
-    await msg.edit_text(f"Search results for '{keyword}':", reply_markup=create_post_buttons(posts))
+    msg = await message.reply_text("Searching database...")
+    posts = await database.search_posts(keyword)
+    
+    if posts:
+        await msg.edit_text(f"Search results for '{keyword}':", reply_markup=create_post_buttons(posts))
+        return
+        
+    # Live Search Fallback
+    await msg.edit_text(f"'{keyword}' not found in DB.\nSearching toonworld4all.me [■■■□□□□□□]...")
+    scraped_posts = await scraper.scrape_search(keyword, limit=10)
+    
+    if not scraped_posts:
+        await msg.edit_text("No posts found on website either.")
+        return
+        
+    # Save newly scraped posts to DB
+    for p in scraped_posts:
+        await database.add_or_update_post(p)
+        
+    # Retrieve them again so they have _id for callbacks
+    posts_after_scrape = await database.search_posts(keyword)
+    if not posts_after_scrape:
+        # Fallback if DB indexing takes a second
+        await asyncio.sleep(1)
+        posts_after_scrape = await database.search_posts(keyword)
+        
+    if posts_after_scrape:
+        await msg.edit_text(f"Successfully scraped! Results for '{keyword}':", reply_markup=create_post_buttons(posts_after_scrape))
+    else:
+        await msg.edit_text("Scraped successfully, but error retrieving from database.")
+
+async def callback_listpg(client, callback_query):
+    parts = callback_query.data.split("_")
+    page = int(parts[1])
+    lang = parts[2]
+    await send_post_list(client, callback_query.message.chat.id, page=page, lang=lang, edit_msg=callback_query.message)
+
+async def callback_filter(client, callback_query):
+    prompt = await callback_query.message.reply_text("Please type the language you want to filter by (e.g., Hindi, Tamil, English):")
+    USER_STATES[callback_query.from_user.id] = {
+        'type': 'filter',
+        'prompt_msg_id': prompt.id
+    }
+    await callback_query.answer()
 
 async def callback_post(client, callback_query):
     post_id = callback_query.data.split("post_")[1]
-    post = await database.get_post_by_id(post_id)
+    post = await database.get_post_by_mongo_id(post_id)
     
     if not post:
         await callback_query.answer("Post not found in database.", show_alert=True)
         return
     
-    # Check if episodes/zips exist, if not scrape details live
-    if 'episodes' not in post or ('episodes' in post and len(post['episodes']) == 0 and len(post['zips']) == 0):
-        await callback_query.message.edit_text("Loading details from website...")
+    if 'episodes' not in post or (len(post.get('episodes', [])) == 0 and len(post.get('zips', [])) == 0):
+        await callback_query.message.edit_text("Loading details from website [■■■□□□□□□]...")
         details = await scraper.scrape_post_details(post['url'])
         if details:
             post.update(details)
@@ -93,7 +189,7 @@ async def callback_post(client, callback_query):
 
 async def callback_list(client, callback_query):
     action, ptype, post_id = callback_query.data.split("_")
-    post = await database.get_post_by_id(post_id)
+    post = await database.get_post_by_mongo_id(post_id)
     
     if not post:
         await callback_query.answer("Post not found.", show_alert=True)
@@ -101,10 +197,8 @@ async def callback_list(client, callback_query):
     
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     
-    # If too many items, just show first 90 to fit in telegram button limits (max 100)
     buttons = []
     for i, item in enumerate(items[:90]):
-        # Pass index and ptype to fetch url later
         buttons.append([InlineKeyboardButton(item['title'], callback_data=f"sel_{ptype}_{post_id}_{i}")])
     
     buttons.append([InlineKeyboardButton("« Back", callback_data=f"post_{post_id}")])
@@ -112,13 +206,12 @@ async def callback_list(client, callback_query):
     await callback_query.message.edit_text("Select:", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def callback_select(client, callback_query):
-    # Data: sel_ep_postid_index
     parts = callback_query.data.split("_")
     ptype = parts[1]
     post_id = parts[2]
     index = int(parts[3])
     
-    post = await database.get_post_by_id(post_id)
+    post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     if index >= len(items):
         await callback_query.answer("Item not found.", show_alert=True)
@@ -127,8 +220,7 @@ async def callback_select(client, callback_query):
     item = items[index]
     archive_url = item['url']
     
-    await callback_query.message.edit_text("Fetching available qualities...")
-    
+    await callback_query.message.edit_text("Fetching available qualities [■■■□□□□□□]...")
     qualities = await scraper.scrape_archive_page(archive_url)
     
     if not qualities:
@@ -136,36 +228,27 @@ async def callback_select(client, callback_query):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}")]]))
         return
     
-    # Store qualities temporarily or in cache. For simplicity, we can just list them and map them.
-    # To keep state simple, we will scrape again on quality select if we don't store it.
-    # Let's save them to the DB under a temporary cache collection or just in the post object?
-    # No, we can just pass the index and let the next callback re-scrape, it's fast enough or use a global dict (cache).
-    
     buttons = []
     for q_name in qualities.keys():
-        # q_name might be long, let's limit it
         short_q = q_name[:20]
-        # We need a way to identify this specific item and quality.
         buttons.append([InlineKeyboardButton(short_q, callback_data=f"qual_{ptype}_{post_id}_{index}_{list(qualities.keys()).index(q_name)}")])
     
     buttons.append([InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}")])
-    
     await callback_query.message.edit_text("Select Quality:", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def callback_quality(client, callback_query):
-    # Data: qual_ep_postid_index_qindex
     parts = callback_query.data.split("_")
     ptype = parts[1]
     post_id = parts[2]
     index = int(parts[3])
     q_index = int(parts[4])
     
-    post = await database.get_post_by_id(post_id)
+    post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     item = items[index]
     archive_url = item['url']
     
-    await callback_query.message.edit_text("Loading sources...")
+    await callback_query.message.edit_text("Loading sources [■■■□□□□□□]...")
     
     qualities = await scraper.scrape_archive_page(archive_url)
     q_keys = list(qualities.keys())
@@ -194,9 +277,9 @@ async def callback_source(client, callback_query):
     post_id = parts[2]
     index = int(parts[3])
     q_index = int(parts[4])
-    s_index = parts[5] # can be 'all'
+    s_index = parts[5]
     
-    post = await database.get_post_by_id(post_id)
+    post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     item = items[index]
     archive_url = item['url']
@@ -221,11 +304,10 @@ async def scrape_initial_command(client, message):
         await message.reply_text("Only owner can use this command.")
         return
     
-    msg = await message.reply_text("Scraping initial 20 posts from homepage... This might take a minute.")
+    msg = await message.reply_text("Scraping initial 20 posts from homepage [■■■□□□□□□]... This might take a minute.")
     
     posts = await scraper.scrape_homepage(limit=20)
     for p in posts:
-        # Get details
         details = await scraper.scrape_post_details(p['url'])
         if details:
             p.update(details)
@@ -236,9 +318,12 @@ async def scrape_initial_command(client, message):
 def register_handlers(app: Client):
     app.add_handler(MessageHandler(start_command, filters.command("start")))
     app.add_handler(MessageHandler(set_lang_command, filters.command("set_lang")))
+    app.add_handler(MessageHandler(list_command, filters.command("list")))
     app.add_handler(MessageHandler(scrape_initial_command, filters.command("scrape_initial")))
     app.add_handler(MessageHandler(search_handler, filters.text))
     
+    app.add_handler(CallbackQueryHandler(callback_listpg, filters.regex(r"^listpg_")))
+    app.add_handler(CallbackQueryHandler(callback_filter, filters.regex(r"^filter_")))
     app.add_handler(CallbackQueryHandler(callback_post, filters.regex(r"^post_")))
     app.add_handler(CallbackQueryHandler(callback_list, filters.regex(r"^list_")))
     app.add_handler(CallbackQueryHandler(callback_select, filters.regex(r"^sel_")))
