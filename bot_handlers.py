@@ -288,17 +288,41 @@ async def callback_quality(client, callback_query):
     sources = qualities[q_name]
     
     buttons = []
-    for src in sources:
-        # Use URL button directly as requested
+    for s_index, src in enumerate(sources):
         src_name = src['source'][:30]
-        buttons.append([InlineKeyboardButton(src_name, url=src['url'])])
+        buttons.append([InlineKeyboardButton(src_name, callback_data=f"src_{ptype}_{post_id}_{index}_{q_index}_{s_index}")])
     
     if len(sources) > 1:
         buttons.append([InlineKeyboardButton("📜 Get All Source Links", callback_data=f"allsrc_{ptype}_{post_id}_{index}_{q_index}")])
     
     buttons.append([InlineKeyboardButton("« Back", callback_data=f"sel_{ptype}_{post_id}_{index}"), InlineKeyboardButton("❌ Close", callback_data="close")])
     
-    await callback_query.message.edit_text(f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\nSelect Source (Long press to copy address):", reply_markup=InlineKeyboardMarkup(buttons))
+    await callback_query.message.edit_text(f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\nSelect Source:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_source(client, callback_query):
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    index = int(parts[3])
+    q_index = int(parts[4])
+    s_index = int(parts[5])
+    
+    post = await database.get_post_by_mongo_id(post_id)
+    items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    item = items[index]
+    archive_url = item['url']
+    
+    qualities = await scraper.scrape_archive_page(archive_url)
+    q_name = list(qualities.keys())[q_index]
+    src = qualities[q_name][s_index]
+    
+    text = f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\n"
+    text += f"**{src['source']}**:\n`{src['url']}`\n\n(Long press the link above to copy it)"
+    
+    await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("« Back to Sources", callback_data=f"qual_{ptype}_{post_id}_{index}_{q_index}")],
+        [InlineKeyboardButton("❌ Close", callback_data="close")]
+    ]))
 
 async def callback_allsrc(client, callback_query):
     parts = callback_query.data.split("_")
@@ -355,4 +379,5 @@ def register_handlers(app: Client):
     app.add_handler(CallbackQueryHandler(callback_list, filters.regex(r"^list_")))
     app.add_handler(CallbackQueryHandler(callback_select, filters.regex(r"^sel_")))
     app.add_handler(CallbackQueryHandler(callback_quality, filters.regex(r"^qual_")))
+    app.add_handler(CallbackQueryHandler(callback_source, filters.regex(r"^src_")))
     app.add_handler(CallbackQueryHandler(callback_allsrc, filters.regex(r"^allsrc_")))

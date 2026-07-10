@@ -127,9 +127,33 @@ async def scrape_archive_page(url):
     soup = BeautifulSoup(html, 'html.parser')
     
     qualities = {}
-    current_quality = "Available Links"
     
-    # Legacy parser
+    # 1. Try React JSON parser (window.__PROPS__)
+    import re
+    import json
+    props_match = re.search(r'window\.__PROPS__\s*=\s*(\{.*?\});', html)
+    if props_match:
+        try:
+            data = json.loads(props_match.group(1))
+            encodes = data.get('data', {}).get('data', {}).get('encodes', [])
+            for encode in encodes:
+                q_name = encode.get('readable', {}).get('codec', encode.get('resolution', 'Unknown'))
+                files = encode.get('files', [])
+                if files:
+                    if q_name not in qualities:
+                        qualities[q_name] = []
+                    for f in files:
+                        qualities[q_name].append({
+                            'source': f.get('host', 'Unknown'),
+                            'url': f"https://archive.toonworld4all.me{f.get('link', '')}"
+                        })
+            if qualities:
+                return qualities
+        except Exception:
+            pass
+            
+    # 2. Legacy parser fallback
+    current_quality = "Available Links"
     for tag in soup.find_all(['h3', 'h4', 'a']):
         if tag.name == 'h3':
             current_quality = tag.get_text(strip=True)
@@ -149,7 +173,7 @@ async def scrape_archive_page(url):
                     "url": full_redirect_url
                 })
                 
-    # React App parser fallback
+    # 3. React App HTML parser fallback (if __PROPS__ is missing)
     if len(qualities) <= 1 and (current_quality not in qualities or not qualities[current_quality]):
         react_sources = []
         for a_tag in soup.find_all('a'):
