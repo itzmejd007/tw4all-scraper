@@ -376,13 +376,11 @@ async def callback_source(client, callback_query):
     q_name = list(qualities.keys())[q_index]
     src = qualities[q_name][s_index]
     
-    redirect_url = src['url']
     shortener_link = src.get('shortener_url', 'Not found in cache (Run /refresh)')
     
     text = f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\n"
     text += f"**{src['source']}**:\n"
-    text += f"Redirect Link:\n`{redirect_url}`\n\n"
-    text += f"Shortener Link:\n`{shortener_link}`\n\n"
+    text += f"Source Link:\n`{shortener_link}`\n\n"
     text += "(Long press the link above to copy it)"
     
     await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
@@ -479,9 +477,8 @@ async def callback_allqual_src(client, callback_query):
     for q_name, sources in qualities.items():
         for s in sources:
             if s['source'] == src_name:
-                redirect_url = s['url']
                 shortener_link = s.get('shortener_url', 'Not found in cache (Run /refresh)')
-                text += f"**{q_name}**:\nRedirect: `{redirect_url}`\nShortener: `{shortener_link}`\n\n"
+                text += f"**{q_name}**:\nSource Link: `{shortener_link}`\n\n"
                 break # Found for this quality, go to next quality
                 
     await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
@@ -569,9 +566,8 @@ async def callback_allepssrc(client, callback_query):
                     break
                     
         if matched_src:
-            redirect_url = matched_src['url']
             shortener_link = matched_src.get('shortener_url', 'Not found in cache')
-            ep_text += f"Redirect: `{redirect_url}`\nShortener: `{shortener_link}`\n\n"
+            ep_text += f"Source Link: `{shortener_link}`\n\n"
         else:
             ep_text += f"❌ Not available in {q_name} from {src_name}.\n\n"
             
@@ -583,9 +579,18 @@ async def callback_allepssrc(client, callback_query):
             
     chunks.append(current_chunk)
     
-    await callback_query.message.delete()
     for chunk in chunks:
-        await client.send_message(callback_query.message.chat.id, chunk, disable_web_page_preview=True)
+        sent_msg = await client.send_message(callback_query.message.chat.id, chunk, disable_web_page_preview=True)
+        
+        # Auto-delete after 5 minutes
+        import asyncio
+        async def auto_delete(msg):
+            await asyncio.sleep(300)
+            try:
+                await msg.delete()
+            except:
+                pass
+        asyncio.create_task(auto_delete(sent_msg))
 
 async def scrape_initial_command(client, message):
     if not await database.is_admin(message.from_user.id):
@@ -896,7 +901,11 @@ async def massive_scrape_task(client, msg=None):
                         if shallow and len(shallow.get('episodes', [])) == len(existing.get('episodes', [])):
                             skip_deep = True
                             
-                details = await scraper.scrape_post_details(p['url'], deep_scrape=not skip_deep)
+                if skip_deep:
+                    success += 1
+                    continue # Skip fetching and updating DB entirely, keeping cached qualities intact
+                    
+                details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
                 if details:
                     p.update(details)
                     await database.add_or_update_post(p)
