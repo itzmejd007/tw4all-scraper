@@ -8,6 +8,7 @@ import config
 
 OWNER_ID = config.OWNER_ID
 USER_STATES = {}
+USER_LIST_STATE = {}
 
 def create_post_buttons(posts):
     buttons = []
@@ -17,6 +18,10 @@ def create_post_buttons(posts):
     return InlineKeyboardMarkup(buttons)
 
 async def start_command(client, message):
+    try:
+        await message.delete()
+    except:
+        pass
     await database.add_or_update_user(message.from_user.id, {
         "user_id": message.from_user.id,
         "first_name": message.from_user.first_name,
@@ -30,6 +35,10 @@ async def start_command(client, message):
     )
 
 async def set_lang_command(client, message):
+    try:
+        await message.delete()
+    except:
+        pass
     if len(message.command) < 2:
         await message.reply_text("Usage: /set_lang <language>\nExample: /set_lang Tamil")
         return
@@ -38,7 +47,10 @@ async def set_lang_command(client, message):
     await database.add_or_update_user(message.from_user.id, {"language_preference": lang})
     await message.reply_text(f"Language preference set to: {lang}. You will be notified when new posts with this language are added.")
 
-async def send_post_list(client, chat_id, page=1, lang="all", edit_msg=None):
+async def send_post_list(client, chat_id, page=1, lang="all", edit_msg=None, user_id=None):
+    if user_id:
+        USER_LIST_STATE[user_id] = {'page': page, 'lang': lang}
+        
     limit = 10
     skip = (page - 1) * limit
     
@@ -88,10 +100,28 @@ async def send_post_list(client, chat_id, page=1, lang="all", edit_msg=None):
     else:
         await client.send_message(chat_id, text, reply_markup=markup)
 
+async def menu_command(client, message):
+    try:
+        await message.delete()
+    except:
+        pass
+    await send_menu(client, message.chat.id)
+
 async def list_command(client, message):
-    await send_post_list(client, message.chat.id, page=1, lang="all")
+    try:
+        await message.delete()
+    except:
+        pass
+    
+    # Reset filter state on new /list command
+    USER_LIST_STATE[message.from_user.id] = {'page': 1, 'lang': 'all'}
+    await send_post_list(client, message.chat.id, page=1, lang="all", user_id=message.from_user.id)
 
 async def search_handler(client, message):
+    try:
+        await message.delete()
+    except:
+        pass
     keyword = message.text.strip()
     if keyword.startswith('/'):
         return
@@ -100,11 +130,12 @@ async def search_handler(client, message):
     if state and state['type'] == 'filter':
         lang = keyword.capitalize()
         try:
-            await client.delete_messages(message.chat.id, [message.id, state['prompt_msg_id']])
+            await client.delete_messages(message.chat.id, [state['prompt_msg_id']])
         except:
             pass
         del USER_STATES[message.from_user.id]
-        await send_post_list(client, message.chat.id, page=1, lang=lang)
+        USER_LIST_STATE[message.from_user.id] = {'page': 1, 'lang': lang}
+        await send_post_list(client, message.chat.id, page=1, lang=lang, user_id=message.from_user.id)
         return
     
     msg = await message.reply_text("Searching database...")
@@ -138,7 +169,8 @@ async def callback_listpg(client, callback_query):
     parts = callback_query.data.split("_")
     page = int(parts[1])
     lang = parts[2]
-    await send_post_list(client, callback_query.message.chat.id, page=page, lang=lang, edit_msg=callback_query.message)
+    USER_LIST_STATE[callback_query.from_user.id] = {'page': page, 'lang': lang}
+    await send_post_list(client, callback_query.message.chat.id, page=page, lang=lang, edit_msg=callback_query.message, user_id=callback_query.from_user.id)
 
 async def callback_filter(client, callback_query):
     prompt = await callback_query.message.reply_text("Please type the language you want to filter by (e.g., Hindi, Tamil, English):")
@@ -194,7 +226,9 @@ async def callback_post(client, callback_query):
     if zip_count > 0:
         buttons.append([InlineKeyboardButton("ZIP Files", callback_data=f"list_zip_{post_id}_0")])
     
-    buttons.append([InlineKeyboardButton("« Back to List", callback_data=f"listpg_1_all"), InlineKeyboardButton("❌ Close", callback_data="close")])
+    # Retrieve persisted state for the Back button
+    state = USER_LIST_STATE.get(callback_query.from_user.id, {'page': 1, 'lang': 'all'})
+    buttons.append([InlineKeyboardButton("« Back to List", callback_data=f"listpg_{state['page']}_{state['lang']}"), InlineKeyboardButton("❌ Close", callback_data="close")])
     
     if not buttons:
         text += "\n\nNo download links found."
@@ -238,6 +272,9 @@ async def callback_list(client, callback_query):
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"list_{ptype}_{post_id}_{page+1}"))
     if nav_row:
         buttons.append(nav_row)
+        
+    if ptype == 'ep' and len(items) > 1:
+        buttons.append([InlineKeyboardButton("📜 Get All Episodes", callback_data=f"alleps_{ptype}_{post_id}")])
     
     buttons.append([InlineKeyboardButton("« Back", callback_data=f"post_{post_id}"), InlineKeyboardButton("❌ Close", callback_data="close")])
     
@@ -451,6 +488,104 @@ async def callback_allqual_src(client, callback_query):
         [InlineKeyboardButton("« Back", callback_data=f"allqual_{ptype}_{post_id}_{index}")],
         [InlineKeyboardButton("❌ Close", callback_data="close")]
     ]))
+
+async def callback_alleps(client, callback_query):
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    
+    post = await database.get_post_by_mongo_id(post_id)
+    items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    
+    if not items or not items[0].get('qualities'):
+        await callback_query.answer("No qualities found. Run Massive Scrape.", show_alert=True)
+        return
+        
+    qualities = items[0]['qualities']
+    
+    text = f"**{post['title']}**\n\n📜 **Get All Episodes**\n\nSelect a Quality for all episodes:"
+    buttons = []
+    
+    # We assume episode 1 has the representative qualities for the series
+    for idx, (q_name, sources) in enumerate(qualities.items()):
+        buttons.append([InlineKeyboardButton(q_name, callback_data=f"allepsq_{ptype}_{post_id}_{idx}")])
+        
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}_0")])
+    await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_allepsq(client, callback_query):
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    q_index = int(parts[3])
+    
+    post = await database.get_post_by_mongo_id(post_id)
+    items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    qualities = items[0].get('qualities', {})
+    
+    q_name = list(qualities.keys())[q_index]
+    sources = qualities[q_name]
+    
+    text = f"**{post['title']}**\nQuality: {q_name}\n\nSelect a Source for all episodes:"
+    buttons = []
+    for idx, src in enumerate(sources):
+        buttons.append([InlineKeyboardButton(src['source'], callback_data=f"allepssrc_{ptype}_{post_id}_{q_index}_{idx}")])
+        
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"alleps_{ptype}_{post_id}")])
+    await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_allepssrc(client, callback_query):
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    q_index = int(parts[3])
+    s_index = int(parts[4])
+    
+    post = await database.get_post_by_mongo_id(post_id)
+    items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    
+    # Identify requested quality and source from Episode 1
+    ref_qualities = items[0].get('qualities', {})
+    q_name = list(ref_qualities.keys())[q_index]
+    src_name = ref_qualities[q_name][s_index]['source']
+    
+    await callback_query.answer("Generating links... This may take a moment.", show_alert=False)
+    
+    header = f"📜 **All Episodes: {post['title']}**\nQuality: **{q_name}** | Source: **{src_name}**\n\n"
+    chunks = []
+    current_chunk = header
+    
+    for item in items:
+        ep_text = f"**{item['title']}**\n"
+        
+        # Find matching quality and source for this specific episode
+        ep_qualities = item.get('qualities', {})
+        matched_src = None
+        
+        if q_name in ep_qualities:
+            for s in ep_qualities[q_name]:
+                if s['source'] == src_name:
+                    matched_src = s
+                    break
+                    
+        if matched_src:
+            redirect_url = matched_src['url']
+            shortener_link = matched_src.get('shortener_url', 'Not found in cache')
+            ep_text += f"Redirect: `{redirect_url}`\nShortener: `{shortener_link}`\n\n"
+        else:
+            ep_text += f"❌ Not available in {q_name} from {src_name}.\n\n"
+            
+        if len(current_chunk) + len(ep_text) > 4000:
+            chunks.append(current_chunk)
+            current_chunk = f"📜 **All Episodes: {post['title']}** (Cont.)\n\n" + ep_text
+        else:
+            current_chunk += ep_text
+            
+    chunks.append(current_chunk)
+    
+    await callback_query.message.delete()
+    for chunk in chunks:
+        await client.send_message(callback_query.message.chat.id, chunk, disable_web_page_preview=True)
 
 async def scrape_initial_command(client, message):
     if not await database.is_admin(message.from_user.id):
@@ -823,6 +958,9 @@ def register_handlers(app: Client):
     app.add_handler(CallbackQueryHandler(callback_allsrc, filters.regex(r"^allsrc_")))
     app.add_handler(CallbackQueryHandler(callback_allqual, filters.regex(r"^allqual_")))
     app.add_handler(CallbackQueryHandler(callback_allqual_src, filters.regex(r"^aqs_")))
+    app.add_handler(CallbackQueryHandler(callback_alleps, filters.regex(r"^alleps_")))
+    app.add_handler(CallbackQueryHandler(callback_allepsq, filters.regex(r"^allepsq_")))
+    app.add_handler(CallbackQueryHandler(callback_allepssrc, filters.regex(r"^allepssrc_")))
     app.add_handler(CallbackQueryHandler(callback_menu, filters.regex(r"^menu_")))
     app.add_handler(CallbackQueryHandler(callback_menumain, filters.regex(r"^menumain$")))
     app.add_handler(CallbackQueryHandler(callback_submenu, filters.regex(r"^subm_")))
