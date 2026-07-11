@@ -340,25 +340,7 @@ async def callback_source(client, callback_query):
     src = qualities[q_name][s_index]
     
     redirect_url = src['url']
-    shortener_link = "Could not extract final link."
-    
-    # Try to extract final shortener link
-    try:
-        import aiohttp
-        import re
-        import json
-        async with aiohttp.ClientSession() as session:
-            async with session.get(redirect_url, timeout=5) as resp:
-                if resp.status == 200:
-                    html = await resp.text()
-                    match = re.search(r'window\.__PROPS__\s*=\s*(\{.*?\});', html)
-                    if match:
-                        data = json.loads(match.group(1))
-                        dest = data.get('destination')
-                        if dest:
-                            shortener_link = dest
-    except Exception as e:
-        pass
+    shortener_link = src.get('shortener_url', 'Not found in cache (Run /refresh)')
     
     text = f"**{post['title']}**\n{item['title']}\nSelected: {q_name}\n\n"
     text += f"**{src['source']}**:\n"
@@ -457,32 +439,14 @@ async def callback_allqual_src(client, callback_query):
     
     text = f"**{post['title']}**\n{item['title']}\nSource: **{src_name}**\n\n"
     
-    import aiohttp
-    import re
-    import json
-    
-    async with aiohttp.ClientSession() as session:
-        for q_name, sources in qualities.items():
-            for s in sources:
-                if s['source'] == src_name:
-                    redirect_url = s['url']
-                    shortener_link = "Not found"
-                    try:
-                        async with session.get(redirect_url, timeout=5) as resp:
-                            if resp.status == 200:
-                                html = await resp.text()
-                                match = re.search(r'window\.__PROPS__\s*=\s*(\{.*?\});', html)
-                                if match:
-                                    data = json.loads(match.group(1))
-                                    dest = data.get('destination')
-                                    if dest:
-                                        shortener_link = dest
-                    except Exception:
-                        pass
-                        
-                    text += f"**{q_name}**:\nRedirect: `{redirect_url}`\nShortener: `{shortener_link}`\n\n"
-                    break # Found for this quality, go to next quality
-                    
+    for q_name, sources in qualities.items():
+        for s in sources:
+            if s['source'] == src_name:
+                redirect_url = s['url']
+                shortener_link = s.get('shortener_url', 'Not found in cache (Run /refresh)')
+                text += f"**{q_name}**:\nRedirect: `{redirect_url}`\nShortener: `{shortener_link}`\n\n"
+                break # Found for this quality, go to next quality
+                
     await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("« Back", callback_data=f"allqual_{ptype}_{post_id}_{index}")],
         [InlineKeyboardButton("❌ Close", callback_data="close")]
@@ -669,8 +633,23 @@ async def callback_submenu(client, callback_query):
         
         await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     else:
-        # Just a normal category browsing (future enhancement to list them page by page)
-        await callback_query.message.edit_text(f"🗃 **{sub['name']}**\nBrowsing standard categories inside the bot is coming soon. Please use search for now.\n\nLink: {url}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=f"menu_{menu_idx}")]]))
+        # Standard category browsing
+        await callback_query.answer("Loading category...", show_alert=False)
+        posts = await scraper.scrape_az_list(url)
+        if not posts:
+            await callback_query.message.edit_text("No posts found in this category.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=f"menu_{menu_idx}")]]))
+            return
+            
+        for p in posts:
+            await database.add_or_update_post(p)
+            
+        text = f"🗃 **{sub['name']}**\nSelect a post:"
+        buttons = []
+        for p in posts[:10]: # First page
+            buttons.append([InlineKeyboardButton(p['title'], callback_data=f"post_{p['post_id']}")])
+            
+        buttons.append([InlineKeyboardButton("« Back", callback_data=f"menu_{menu_idx}")])
+        await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 AZ_SYNC_QUEUE = []
 
@@ -682,29 +661,39 @@ async def azsync_task(client, msg):
     total = len(queue)
     success = 0
     failed = []
+    import asyncio
+    import io
     
     for i, p in enumerate(queue):
-        if i % 5 == 0:
+        if i % 3 == 0:
             try:
-                bar = "█" * int((i/total)*10) + "░" * (10 - int((i/total)*10))
+                progress = (i / total) if total > 0 else 1
+                bar_len = 10
+                filled = int(bar_len * progress)
+                bar = "█" * filled + "░" * (bar_len - filled)
                 await msg.edit_text(f"🔄 **Syncing Posts...**\n\nProgress: [{bar}] {i}/{total}\nScraping: {p['title']}")
             except:
                 pass
                 
-        details = await scraper.scrape_post_details(p['url'])
+        details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
         if details:
             p.update(details)
             await database.add_or_update_post(p)
             success += 1
         else:
             failed.append(p['url'])
+        await asyncio.sleep(0.5)
             
     text = f"✅ **Sync Complete!**\n\nSuccessfully added: {success}/{total} posts."
     if failed:
-        text += f"\n\nFailed to scrape {len(failed)} posts. Check logs."
-        print("Failed posts:", failed)
-        
-    await msg.edit_text(text)
+        text += f"\nFailed to scrape {len(failed)} posts."
+        log_content = "\n".join(failed)
+        log_file = io.BytesIO(log_content.encode('utf-8'))
+        log_file.name = "failed_azsync.txt"
+        await client.send_document(msg.chat.id, log_file, caption=text)
+        await msg.delete()
+    else:
+        await msg.edit_text(text)
 
 async def callback_azsync(client, callback_query):
     await callback_query.answer("Starting background sync...", show_alert=False)
@@ -742,10 +731,37 @@ async def massive_scrape_task(client, msg=None):
         
         success = 0
         failed = []
+        import asyncio
+        import io
         
         for i, p in enumerate(unique_posts):
             try:
-                details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
+                # Visual Progress Bar
+                if msg and i % 5 == 0:
+                    progress = (i / total_posts) if total_posts > 0 else 1
+                    bar_len = 12
+                    filled = int(bar_len * progress)
+                    bar = "█" * filled + "░" * (bar_len - filled)
+                    try:
+                        await msg.edit_text(f"🔄 **Massive Scrape Running...**\n\nProgress: [{bar}] {i}/{total_posts}\nChecking: {p['title'][:30]}")
+                    except:
+                        pass
+                
+                # Smart Incremental Check
+                existing = await database.get_post_by_id(p['post_id'])
+                skip_deep = False
+                
+                if existing and existing.get('episodes'):
+                    # Check if all episodes have qualities already
+                    has_all = all(ep.get('qualities') for ep in existing.get('episodes', []))
+                    if has_all:
+                        # Quick fetch to compare episode count
+                        shallow = await scraper.scrape_post_details(p['url'], deep_scrape=False)
+                        await asyncio.sleep(0.5)
+                        if shallow and len(shallow.get('episodes', [])) == len(existing.get('episodes', [])):
+                            skip_deep = True
+                            
+                details = await scraper.scrape_post_details(p['url'], deep_scrape=not skip_deep)
                 if details:
                     p.update(details)
                     await database.add_or_update_post(p)
@@ -754,6 +770,8 @@ async def massive_scrape_task(client, msg=None):
                     failed.append(p['url'])
             except Exception:
                 failed.append(p['url'])
+            
+            await asyncio.sleep(0.5)
                 
             # Log progress every 50 posts
             if i > 0 and i % 50 == 0:
@@ -762,12 +780,12 @@ async def massive_scrape_task(client, msg=None):
         # Scrape complete
         text = f"✅ **Massive Background Scrape Complete!**\n\nTotal Posts Found: {total_posts}\nSuccessfully Added/Updated: {success}\nFailed: {len(failed)}\n\n"
         if failed:
-            text += "Some posts failed to scrape. Check the server logs for the full list."
-            print("FAILED MASSIVE SCRAPE LINKS:")
-            for f in failed:
-                print(f)
-                
-        await client.send_message(config.OWNER_ID, text)
+            log_content = "\n".join(failed)
+            log_file = io.BytesIO(log_content.encode('utf-8'))
+            log_file.name = "failed_massive_scrape.txt"
+            await client.send_document(config.OWNER_ID, log_file, caption=text)
+        else:
+            await client.send_message(config.OWNER_ID, text)
         
     except Exception as e:
         print(f"Massive scrape failed: {e}")

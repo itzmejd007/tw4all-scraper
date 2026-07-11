@@ -99,18 +99,22 @@ async def scrape_post_details(url, deep_scrape=False):
     if content:
         for a_tag in content.find_all('a'):
             href = a_tag.get('href', '')
-            if 'archive.toonworld4all.me/episode' in href:
-                ep_num = len(episodes) + 1
-                episodes.append({
-                    "title": f"Episode {ep_num:02d}",
-                    "url": href
-                })
-            elif 'archive.toonworld4all.me/zip' in href:
-                zip_num = len(zips) + 1
-                zips.append({
-                    "title": f"ZIP {zip_num:02d}",
-                    "url": href
-                })
+            # Generalize archive link detection
+            if 'archive.' in href or 'link.' in href or 'toonworld4all' in href and ('/episode' in href or '/zip' in href or 'redirect' in href):
+                if '/zip' in href.lower() or 'batch' in a_tag.get_text(strip=True).lower():
+                    if not any(z['url'] == href for z in zips):
+                        zip_num = len(zips) + 1
+                        zips.append({
+                            "title": f"ZIP {zip_num:02d}",
+                            "url": href
+                        })
+                else:
+                    if not any(ep['url'] == href for ep in episodes):
+                        ep_num = len(episodes) + 1
+                        episodes.append({
+                            "title": f"Episode {ep_num:02d}",
+                            "url": href
+                        })
                 
     post_details = {
         "title": title,
@@ -121,22 +125,46 @@ async def scrape_post_details(url, deep_scrape=False):
     
     if deep_scrape:
         import asyncio
-        async def fetch_qualities(item):
-            q = await scrape_archive_page(item['url'])
-            if q:
-                item['qualities'] = q
-            return item
-            
-        tasks = []
         for ep in post_details['episodes']:
-            tasks.append(fetch_qualities(ep))
-        for z in post_details['zips']:
-            tasks.append(fetch_qualities(z))
+            q = await scrape_archive_page(ep['url'])
+            if q:
+                for q_name, sources in q.items():
+                    for s in sources:
+                        s['shortener_url'] = await extract_shortener_link(s['url'])
+                        await asyncio.sleep(0.2)
+                ep['qualities'] = q
+            await asyncio.sleep(0.5)
             
-        if tasks:
-            await asyncio.gather(*tasks)
+        for z in post_details['zips']:
+            q = await scrape_archive_page(z['url'])
+            if q:
+                for q_name, sources in q.items():
+                    for s in sources:
+                        s['shortener_url'] = await extract_shortener_link(s['url'])
+                        await asyncio.sleep(0.2)
+                z['qualities'] = q
+            await asyncio.sleep(0.5)
             
     return post_details
+
+async def extract_shortener_link(url):
+    import aiohttp
+    import re
+    import json
+    try:
+        async with aiohttp.ClientSession(headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}) as session:
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    match = re.search(r'window\.__PROPS__\s*=\s*(\{.*?\});', html)
+                    if match:
+                        data = json.loads(match.group(1))
+                        dest = data.get('destination')
+                        if dest:
+                            return dest
+    except Exception:
+        pass
+    return "Not found"
 
 async def scrape_archive_page(url):
     html = await fetch_html(url)

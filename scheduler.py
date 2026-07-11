@@ -35,29 +35,30 @@ async def check_new_posts(client):
                         except:
                             pass
             else:
-                # Check for updates (e.g. new episodes)
-                details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
-                if details:
+                # Post exists, check if new episodes were added by doing a shallow scrape first
+                shallow_details = await scraper.scrape_post_details(p['url'], deep_scrape=False)
+                if shallow_details:
                     old_eps = len(existing.get('episodes', []))
-                    new_eps = len(details.get('episodes', []))
-                    old_zips = len(existing.get('zips', []))
-                    new_zips = len(details.get('zips', []))
+                    new_eps = len(shallow_details.get('episodes', []))
                     
-                    if new_eps > old_eps or new_zips > old_zips:
-                        p.update(details)
-                        await database.add_or_update_post(p)
-                        update_count += 1
-                        
-                        # Notify about update
-                        admins = await database.get_all_admins()
-                        admins.append(config.OWNER_ID)
-                        for user in list(set(admins)):
-                            try:
-                                from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎬 View Update", callback_data=f"post_{p['post_id']}")]])
-                                await client.send_message(user, f"🔄 **Post Updated!**\n\n**{p['title']}**\nAdded {new_eps - old_eps} new Episodes, {new_zips - old_zips} new ZIPs.", reply_markup=btn)
-                            except:
-                                pass
+                    if new_eps > old_eps:
+                        # New episodes added! Now do a deep scrape to get all links
+                        details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
+                        if details:
+                            p.update(details)
+                            await database.add_or_update_post(p)
+                            update_count += 1
+                            
+                            # Notify about update
+                            admins = await database.get_all_admins()
+                            admins.append(config.OWNER_ID)
+                            for user in list(set(admins)):
+                                try:
+                                    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎬 View Update", callback_data=f"post_{p['post_id']}")]])
+                                    await client.send_message(user, f"🔄 **Post Updated!**\n\n**{p['title']}**\nAdded {new_eps - old_eps} new Episodes.", reply_markup=btn)
+                                except:
+                                    pass
                                 
     except Exception as e:
         print(f"Error checking new posts: {e}")
