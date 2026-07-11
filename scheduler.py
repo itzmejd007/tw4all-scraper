@@ -18,14 +18,25 @@ async def check_new_posts(client):
             existing = await database.get_post_by_id(p['post_id'])
             if not existing:
                 # New post found
-                details = await scraper.scrape_post_details(p['url'])
+                details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
                 if details:
                     p.update(details)
                     await database.add_or_update_post(p)
                     new_count += 1
+                    
+                    # Notify about new post
+                    admins = await database.get_all_admins()
+                    admins.append(config.OWNER_ID)
+                    for user in list(set(admins)):
+                        try:
+                            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎬 View Post", callback_data=f"post_{p['post_id']}")]])
+                            await client.send_message(user, f"🆕 **New Post Added!**\n\n**{p['title']}**\nAdded: {len(p.get('episodes', []))} Episodes, {len(p.get('zips', []))} ZIPs.", reply_markup=btn)
+                        except:
+                            pass
             else:
                 # Check for updates (e.g. new episodes)
-                details = await scraper.scrape_post_details(p['url'])
+                details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
                 if details:
                     old_eps = len(existing.get('episodes', []))
                     new_eps = len(details.get('episodes', []))
@@ -37,19 +48,17 @@ async def check_new_posts(client):
                         await database.add_or_update_post(p)
                         update_count += 1
                         
-        if new_count > 0 or update_count > 0:
-            admins = await database.get_all_admins()
-            admins.append(config.OWNER_ID)
-            admins = list(set(admins)) # deduplicate
-            
-            for admin_id in admins:
-                try:
-                    await client.send_message(
-                        admin_id, 
-                        f"🔄 **Auto-Update Complete**\n\nNew Posts Added: {new_count}\nExisting Posts Updated: {update_count}"
-                    )
-                except Exception:
-                    pass
+                        # Notify about update
+                        admins = await database.get_all_admins()
+                        admins.append(config.OWNER_ID)
+                        for user in list(set(admins)):
+                            try:
+                                from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎬 View Update", callback_data=f"post_{p['post_id']}")]])
+                                await client.send_message(user, f"🔄 **Post Updated!**\n\n**{p['title']}**\nAdded {new_eps - old_eps} new Episodes, {new_zips - old_zips} new ZIPs.", reply_markup=btn)
+                            except:
+                                pass
+                                
     except Exception as e:
         print(f"Error checking new posts: {e}")
 
@@ -83,6 +92,10 @@ def setup_scheduler(client):
     
     # Weekly logs (run every 7 days)
     scheduler.add_job(send_weekly_logs, "interval", days=7, args=[client])
+    
+    # Run massive scrape every night at 12 AM
+    import bot_handlers
+    scheduler.add_job(bot_handlers.run_nightly_massive_scrape, "cron", hour=0, minute=0, args=[client])
     
     scheduler.start()
     return scheduler

@@ -82,7 +82,7 @@ async def scrape_search(keyword, limit=5):
                     })
     return posts
 
-async def scrape_post_details(url):
+async def scrape_post_details(url, deep_scrape=False):
     html = await fetch_html(url)
     if not html:
         return None
@@ -112,12 +112,31 @@ async def scrape_post_details(url):
                     "url": href
                 })
                 
-    return {
+    post_details = {
         "title": title,
         "languages": extract_languages_from_title(title),
         "episodes": episodes,
         "zips": zips
     }
+    
+    if deep_scrape:
+        import asyncio
+        async def fetch_qualities(item):
+            q = await scrape_archive_page(item['url'])
+            if q:
+                item['qualities'] = q
+            return item
+            
+        tasks = []
+        for ep in post_details['episodes']:
+            tasks.append(fetch_qualities(ep))
+        for z in post_details['zips']:
+            tasks.append(fetch_qualities(z))
+            
+        if tasks:
+            await asyncio.gather(*tasks)
+            
+    return post_details
 
 async def scrape_archive_page(url):
     html = await fetch_html(url)
@@ -200,27 +219,20 @@ async def scrape_website_menu():
     menus = []
     
     for nav in soup.find_all('nav', class_='main-navigation'):
-        for ul in nav.find_all('ul'):
-            if 'menu' in (ul.get('class') or []):
-                for li in ul.find_all('li', recursive=False):
-                    a = li.find('a', recursive=False)
-                    if a:
-                        menu_item = {
-                            "name": a.get_text(strip=True),
-                            "url": a.get('href'),
-                            "sub": []
-                        }
-                        sub_ul = li.find('ul', recursive=False)
-                        if sub_ul:
-                            for sub_li in sub_ul.find_all('li', recursive=False):
-                                sub_a = sub_li.find('a', recursive=False)
-                                if sub_a:
-                                    menu_item["sub"].append({
-                                        "name": sub_a.get_text(strip=True),
-                                        "url": sub_a.get('href')
-                                    })
-                        menus.append(menu_item)
-                break 
+        main_item = {"name": "Website Navigation", "url": BASE_URL, "sub": []}
+        seen_urls = set()
+        for a in nav.find_all('a'):
+            href = a.get('href', '')
+            name = a.get_text(strip=True)
+            if href and href != '#' and name and href not in seen_urls:
+                main_item["sub"].append({
+                    "name": name,
+                    "url": href
+                })
+                seen_urls.add(href)
+        if main_item["sub"]:
+            menus.append(main_item)
+            
     return menus
 
 async def scrape_az_list(url):

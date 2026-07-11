@@ -256,10 +256,15 @@ async def callback_select(client, callback_query):
         return
     
     item = items[index]
-    archive_url = item['url']
     
-    await callback_query.answer("Fetching qualities...", show_alert=False)
-    qualities = await scraper.scrape_archive_page(archive_url)
+    qualities = item.get('qualities')
+    if not qualities:
+        await callback_query.answer("Fetching qualities from web...", show_alert=False)
+        qualities = await scraper.scrape_archive_page(item['url'])
+        item['qualities'] = qualities
+        await database.add_or_update_post(post)
+    else:
+        await callback_query.answer("Loaded instantly from cache.", show_alert=False)
     
     # Calculate what page we were on to go back correctly
     page = index // 20
@@ -274,6 +279,9 @@ async def callback_select(client, callback_query):
         short_q = q_name[:30]
         buttons.append([InlineKeyboardButton(short_q, callback_data=f"qual_{ptype}_{post_id}_{index}_{list(qualities.keys()).index(q_name)}")])
     
+    if len(qualities) > 0:
+        buttons.append([InlineKeyboardButton("📜 Get All Qualities (Select Source)", callback_data=f"allqual_{ptype}_{post_id}_{index}")])
+        
     buttons.append([InlineKeyboardButton("« Back", callback_data=f"list_{ptype}_{post_id}_{page}"), InlineKeyboardButton("❌ Close", callback_data="close")])
     await callback_query.message.edit_text(f"**{post['title']}**\n{item['title']}\nSelect Quality:", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -287,11 +295,12 @@ async def callback_quality(client, callback_query):
     post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     item = items[index]
-    archive_url = item['url']
     
     await callback_query.answer("Loading sources...", show_alert=False)
     
-    qualities = await scraper.scrape_archive_page(archive_url)
+    qualities = item.get('qualities')
+    if not qualities:
+        qualities = await scraper.scrape_archive_page(item['url'])
     q_keys = list(qualities.keys())
     if q_index >= len(q_keys):
         await callback_query.answer("Error loading quality.", show_alert=True)
@@ -323,9 +332,10 @@ async def callback_source(client, callback_query):
     post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     item = items[index]
-    archive_url = item['url']
     
-    qualities = await scraper.scrape_archive_page(archive_url)
+    qualities = item.get('qualities')
+    if not qualities:
+        qualities = await scraper.scrape_archive_page(item['url'])
     q_name = list(qualities.keys())[q_index]
     src = qualities[q_name][s_index]
     
@@ -371,9 +381,10 @@ async def callback_allsrc(client, callback_query):
     post = await database.get_post_by_mongo_id(post_id)
     items = post.get('episodes' if ptype == 'ep' else 'zips', [])
     item = items[index]
-    archive_url = item['url']
     
-    qualities = await scraper.scrape_archive_page(archive_url)
+    qualities = item.get('qualities')
+    if not qualities:
+        qualities = await scraper.scrape_archive_page(item['url'])
     q_name = list(qualities.keys())[q_index]
     sources = qualities[q_name]
     
@@ -383,6 +394,97 @@ async def callback_allsrc(client, callback_query):
         
     await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("« Back", callback_data=f"qual_{ptype}_{post_id}_{index}_{q_index}")],
+        [InlineKeyboardButton("❌ Close", callback_data="close")]
+    ]))
+
+async def callback_allqual(client, callback_query):
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    index = int(parts[3])
+    
+    post = await database.get_post_by_mongo_id(post_id)
+    items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    item = items[index]
+    
+    qualities = item.get('qualities', {})
+    if not qualities:
+        await callback_query.answer("No qualities found.", show_alert=True)
+        return
+        
+    unique_sources = set()
+    for q_name, sources in qualities.items():
+        for s in sources:
+            unique_sources.add(s['source'])
+            
+    if not unique_sources:
+        await callback_query.answer("No sources found.", show_alert=True)
+        return
+        
+    buttons = []
+    for src_name in unique_sources:
+        # Base64 encode or just pass hash to avoid long callback data
+        # Actually, let's just pass the source name index or pass it in chunks
+        src_id = list(unique_sources).index(src_name)
+        buttons.append([InlineKeyboardButton(src_name[:30], callback_data=f"aqs_{ptype}_{post_id}_{index}_{src_id}")])
+        
+    # Temporarily save unique_sources in user states or we can just recompute it later.
+    # We will recompute it in `callback_allqual_src`
+    
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"sel_{ptype}_{post_id}_{index}"), InlineKeyboardButton("❌ Close", callback_data="close")])
+    await callback_query.message.edit_text(f"**{post['title']}**\n{item['title']}\n\nSelect a Source to get ALL qualities:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def callback_allqual_src(client, callback_query):
+    parts = callback_query.data.split("_")
+    ptype = parts[1]
+    post_id = parts[2]
+    index = int(parts[3])
+    src_id = int(parts[4])
+    
+    post = await database.get_post_by_mongo_id(post_id)
+    items = post.get('episodes' if ptype == 'ep' else 'zips', [])
+    item = items[index]
+    
+    qualities = item.get('qualities', {})
+    
+    unique_sources = list(set(s['source'] for sources in qualities.values() for s in sources))
+    if src_id >= len(unique_sources):
+        return
+    
+    src_name = unique_sources[src_id]
+    
+    await callback_query.answer("Extracting shortener links (this may take a moment)...", show_alert=False)
+    
+    text = f"**{post['title']}**\n{item['title']}\nSource: **{src_name}**\n\n"
+    
+    import aiohttp
+    import re
+    import json
+    
+    async with aiohttp.ClientSession() as session:
+        for q_name, sources in qualities.items():
+            for s in sources:
+                if s['source'] == src_name:
+                    redirect_url = s['url']
+                    shortener_link = "Not found"
+                    try:
+                        async with session.get(redirect_url, timeout=5) as resp:
+                            if resp.status == 200:
+                                html = await resp.text()
+                                match = re.search(r'window\.__PROPS__\s*=\s*(\{.*?\});', html)
+                                if match:
+                                    data = json.loads(match.group(1))
+                                    dest = data.get('destination')
+                                    if dest:
+                                        shortener_link = dest
+                    except Exception:
+                        pass
+                        
+                    text += f"**{q_name}**:\nRedirect: `{redirect_url}`\nShortener: `{shortener_link}`\n\n"
+                    break # Found for this quality, go to next quality
+                    
+    await callback_query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("« Back", callback_data=f"allqual_{ptype}_{post_id}_{index}")],
         [InlineKeyboardButton("❌ Close", callback_data="close")]
     ]))
 
@@ -609,9 +711,12 @@ async def callback_azsync(client, callback_query):
     msg = await callback_query.message.edit_text("🔄 Preparing to scrape...")
     asyncio.create_task(azsync_task(client, msg))
 
-async def massive_scrape_task(client, msg):
+async def massive_scrape_task(client, msg=None):
     try:
-        await msg.edit_text("🔄 **Massive Scrape Started**\n\nFetching website menus to find all A-Z lists...")
+        if msg:
+            await msg.edit_text("🔄 **Massive Scrape Started**\n\nFetching website menus to find all A-Z lists...")
+        else:
+            print("Nightly Scrape Started")
         menus = await scraper.scrape_website_menu()
         
         list_urls = []
@@ -620,7 +725,8 @@ async def massive_scrape_task(client, msg):
                 if 'list_' in sub['url'] or '-list' in sub['url']:
                     list_urls.append(sub['url'])
                     
-        await msg.edit_text(f"🔄 **Massive Scrape**\n\nFound {len(list_urls)} A-Z Lists. Fetching all posts from them...")
+        if msg:
+            await msg.edit_text(f"🔄 **Massive Scrape**\n\nFound {len(list_urls)} lists/categories. Fetching all posts from them...")
         
         all_posts = []
         for url in list_urls:
@@ -628,17 +734,18 @@ async def massive_scrape_task(client, msg):
             all_posts.extend(posts)
             
         # Deduplicate by URL
-        unique_posts = {p['url']: p for p in all_posts}.values()
+        unique_posts = list({p['url']: p for p in all_posts}.values())
         total_posts = len(unique_posts)
         
-        await msg.edit_text(f"🔄 **Massive Scrape**\n\nFound {total_posts} unique posts across all lists. Starting deep scrape...\nThis will run in the background. You can use the bot normally.")
+        if msg:
+            await msg.edit_text(f"🔄 **Massive Scrape**\n\nFound {total_posts} unique posts across all lists. Starting deep scrape (this will fetch all qualities/sources and take a while)...\nThis will run in the background. You can use the bot normally.")
         
         success = 0
         failed = []
         
         for i, p in enumerate(unique_posts):
             try:
-                details = await scraper.scrape_post_details(p['url'])
+                details = await scraper.scrape_post_details(p['url'], deep_scrape=True)
                 if details:
                     p.update(details)
                     await database.add_or_update_post(p)
@@ -665,6 +772,9 @@ async def massive_scrape_task(client, msg):
     except Exception as e:
         print(f"Massive scrape failed: {e}")
         await client.send_message(config.OWNER_ID, f"❌ Massive scrape crashed: {e}")
+
+async def run_nightly_massive_scrape(client):
+    await massive_scrape_task(client, msg=None)
 
 async def callback_massive_scrape_start(client, callback_query):
     if not await database.is_admin(callback_query.from_user.id):
@@ -693,6 +803,8 @@ def register_handlers(app: Client):
     app.add_handler(CallbackQueryHandler(callback_quality, filters.regex(r"^qual_")))
     app.add_handler(CallbackQueryHandler(callback_source, filters.regex(r"^src_")))
     app.add_handler(CallbackQueryHandler(callback_allsrc, filters.regex(r"^allsrc_")))
+    app.add_handler(CallbackQueryHandler(callback_allqual, filters.regex(r"^allqual_")))
+    app.add_handler(CallbackQueryHandler(callback_allqual_src, filters.regex(r"^aqs_")))
     app.add_handler(CallbackQueryHandler(callback_menu, filters.regex(r"^menu_")))
     app.add_handler(CallbackQueryHandler(callback_menumain, filters.regex(r"^menumain$")))
     app.add_handler(CallbackQueryHandler(callback_submenu, filters.regex(r"^subm_")))
